@@ -81,7 +81,7 @@ test("Qwen's unified menu has contiguous off/efforts with truthful active rows a
       assert.equal(h.row("low").props.star.isDefault, true);
       assert.deepEqual(h.rows.filter((row) => row.props.active).map((row) => row.key.split("$").at(-1)), [current]);
       assert.deepEqual(h.calls, [], "opening/rendering changes neither selection nor default");
-      assert.deepEqual(h.rowColumns("off"), ["off", "Reasoning off"], "off uses separate value/description columns, never the internal none marker");
+      assert.deepEqual(h.rowColumns("off"), ["Reasoning off"], "only the description, never the short label or internal none marker");
       const html = h.html();
       assert.match(html, /role="listbox"/);
       assert.equal([...html.matchAll(/aria-selected="true"/g)].length, 1);
@@ -92,7 +92,7 @@ test("Qwen's unified menu has contiguous off/efforts with truthful active rows a
   }
 });
 
-test("binary, Qwen and GPT menus share a spacious minimum width regardless of short labels", () => {
+test("binary, Qwen and GPT menus share a compact minimum width with a single left-aligned description", () => {
   for (const locale of ["en", "zh-CN", "zh-TW"]) {
     for (const canSave of [false, true]) {
       for (const props of [
@@ -101,8 +101,15 @@ test("binary, Qwen and GPT menus share a spacious minimum width regardless of sh
         { levels: ["low", "medium", "high", "xhigh", "max"], current: "high", toggle: false },
       ]) {
         const h = harness({ ...props, locale, canSave });
-        assert.equal(h.menu.props.style.minWidth, 224);
-        assert.equal(h.menu.props.style.width, undefined, "longer translated or mapped labels can still expand");
+        assert.equal(h.menu.props.style.minWidth, 160);
+        assert.equal(h.menu.props.style.width, undefined, "longer translated descriptions can still expand");
+        for (const row of h.rows) {
+          const columns = React.Children.toArray(row.props.children);
+          assert.equal(columns.length, 1, "no redundant short-label column");
+          assert.equal(columns[0].props.style.textAlign, "left");
+          assert.equal(columns[0].props.style.flex, 1, "description fills the space before the star gutter");
+          assert.ok(columns[0].props.children);
+        }
       }
     }
   }
@@ -178,8 +185,8 @@ test("Gemma has only on/off with menu stars and sends the real internal enabled 
       for (const saved of [null, "off", marker]) {
         const h = harness({ levels: ["off", marker], current, saved, levelMap: { off: "none", [marker]: "internal" } });
         assert.deepEqual(h.rowLevels(), [marker, "off"]);
-        assert.deepEqual(h.rowColumns(marker), ["on", "Reasoning on"]);
-        assert.deepEqual(h.rowColumns("off"), ["off", "Reasoning off"]);
+        assert.deepEqual(h.rowColumns(marker), ["Reasoning on"]);
+        assert.deepEqual(h.rowColumns("off"), ["Reasoning off"]);
         assert.equal(h.triggerLabel, current === "off" ? "off" : "on");
         assert.equal(h.row(current).props.active, true);
         assert.equal(h.rows.every((row) => row.props.star && row.props.gutter), true);
@@ -235,10 +242,26 @@ test("actual unified labels reuse all existing translations, including binary me
     assert.equal(harness({ current: "off", locale }).triggerLabel, "off");
     const binary = harness({ levels: ["off", "medium"], current: "medium", locale });
     assert.equal(binary.triggerLabel, "on");
-    assert.deepEqual(binary.rowColumns("medium"), ["on", on]);
-    assert.deepEqual(binary.rowColumns("off"), ["off", off]);
+    assert.deepEqual(binary.rowColumns("medium"), [on]);
+    assert.deepEqual(binary.rowColumns("off"), [off]);
     assert.equal(harness({ levels: ["off", "medium"], current: "off", locale }).triggerLabel, "off");
-    assert.deepEqual(harness({ current: "off", locale }).rowColumns("off"), ["off", off]);
+    assert.deepEqual(harness({ current: "off", locale }).rowColumns("off"), [off]);
+  }
+});
+
+test("effort menus show descriptions only, while mapped short labels stay in the trigger", () => {
+  for (const toggle of [false, true]) {
+    const h = harness({ levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"], toggle,
+      current: "xhigh", levelMap: { off: "none", xhigh: "maximum" } });
+    assert.equal(h.triggerLabel, "maximum");
+    for (const [level, description] of Object.entries({
+      off: "Reasoning off", minimal: "Minimal reasoning", low: "Low reasoning",
+      medium: "Medium reasoning", high: "High reasoning", xhigh: "Extra-high reasoning", max: "Max reasoning",
+    })) {
+      assert.deepEqual(h.rowColumns(level), [description]);
+    }
+    const menuHtml = renderToStaticMarkup(React.createElement(I18nProvider, null, h.menu));
+    assert.doesNotMatch(menuHtml, />maximum<|>none<|\(xhigh\)/);
   }
 });
 

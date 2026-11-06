@@ -2688,7 +2688,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     right: 0,
                     zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
                     borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                    overflow: "hidden", minWidth: 224,
+                    overflow: "hidden", minWidth: 160,
                   }}>
                     {thinkingControl.menuLevels.map((lvl) => {
                       const isActive = effectiveThinkingLevel === lvl;
@@ -2696,10 +2696,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       const isToggleOff = hasThinkingToggle && lvl === "off";
                       const desc = isToggleOff ? t("chat.thinkingOff")
                         : isBinaryLabel ? t("chat.thinkingOn") : t(THINKING_LEVEL_DESC_KEYS[lvl]);
-                      const mappedVal = thinkingLevelMap ? thinkingLevelMap[lvl] : undefined;
-                      const displayLabel = isToggleOff ? "off" : isBinaryLabel ? "on"
-                        : (mappedVal != null && mappedVal !== lvl) ? mappedVal : lvl;
-                      const showOriginal = !isBinaryLabel && !isToggleOff && mappedVal != null && mappedVal !== lvl;
                       return (
                         <SelectorRow
                           key={lvl}
@@ -2721,11 +2717,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                               }
                             : undefined}
                         >
-                          <span style={{ flex: 1 }}>
-                            {displayLabel}
-                            {showOriginal && <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginLeft: 5 }}>({lvl})</span>}
-                          </span>
-                          {desc && <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{desc}</span>}
+                          <span style={{ flex: 1, textAlign: "left" }}>{desc}</span>
                         </SelectorRow>
                       );
                     })}
