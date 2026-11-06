@@ -107,6 +107,7 @@ test("binary, Qwen and GPT menus share a compact minimum width with a single lef
           const columns = React.Children.toArray(row.props.children);
           assert.equal(columns.length, 1, "no redundant short-label column");
           assert.equal(columns[0].props.style.textAlign, "left");
+          assert.equal(columns[0].props.style.paddingRight, 12, "leave breathing room before the star button, even for the longest description");
           assert.equal(columns[0].props.style.flex, 1, "description fills the space before the star gutter");
           assert.ok(columns[0].props.children);
         }

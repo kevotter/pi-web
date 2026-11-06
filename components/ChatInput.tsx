@@ -2717,7 +2717,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                               }
                             : undefined}
                         >
-                          <span style={{ flex: 1, textAlign: "left" }}>{desc}</span>
+                          <span style={{ flex: 1, textAlign: "left", paddingRight: 12 }}>{desc}</span>
                         </SelectorRow>
                       );
                     })}
