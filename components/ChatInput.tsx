@@ -1729,10 +1729,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     ? thinkingLevelMap?.[effectiveThinkingLevel] ?? effectiveThinkingLevel
     : "auto";
   const thinkingTriggerLabel = hasThinkingToggle
-    ? !thinkingToggleOn ? t("chat.thinkingOff")
-      : thinkingMode === "toggle" ? t("chat.thinkingOn")
-        // Reuse the primary term from the translated "Reasoning / thinking" label.
-        : `${t("models.reasoning").split(" / ")[0]} · ${thinkingDisplayLabel}`
+    ? !thinkingToggleOn ? "off" : thinkingMode === "toggle" ? "on" : thinkingDisplayLabel
     : thinkingDisplayLabel;
   const selectThinkingLevel = (level: ThinkingControlLevel) => {
     setThinkingDropdownOpen(false);
@@ -2647,16 +2644,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               } : null),
             }}>
             {onThinkingLevelChange && thinkingMode !== "none" && (
-              <div ref={thinkingDropdownRef} style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <div ref={thinkingDropdownRef} style={{ position: isMobile ? "static" : "relative", display: "flex", alignItems: "center" }}>
                 <button
                   onClick={() => setThinkingDropdownOpen((v) => !v)}
                   aria-haspopup="listbox"
                   aria-expanded={thinkingDropdownOpen}
-                  title={hasThinkingToggle
-                    ? thinkingTriggerLabel
-                    : isStreaming
-                      ? t("chat.currentReasoning", { level: thinkingDisplayLabel })
-                      : t("chat.changeReasoning", { level: thinkingDisplayLabel })}
+                  title={isStreaming
+                    ? t("chat.currentReasoning", { level: thinkingTriggerLabel })
+                    : t("chat.changeReasoning", { level: thinkingTriggerLabel })}
                   aria-label={t("chat.changeReasoningLabel")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
@@ -2690,22 +2685,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 {thinkingDropdownOpen && (
                   <div role="listbox" aria-label={t("chat.changeReasoningLabel")} style={{
                     position: "absolute", bottom: "calc(100% + 6px)",
-                    ...(isMobile ? { left: 0 } : { right: 0 }),
+                    right: 0,
                     zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
                     borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                    overflow: "hidden", minWidth: 180,
+                    overflow: "hidden", minWidth: 224,
                   }}>
                     {thinkingControl.menuLevels.map((lvl) => {
                       const isActive = effectiveThinkingLevel === lvl;
-                      const isBinaryLabel = hasThinkingToggle && (lvl === "off" || thinkingMode === "toggle");
-                      const isToggleOff = thinkingMode === "toggle-levels" && lvl === "off";
+                      const isBinaryLabel = thinkingMode === "toggle";
+                      const isToggleOff = hasThinkingToggle && lvl === "off";
                       const desc = isToggleOff ? t("chat.thinkingOff")
-                        : isBinaryLabel ? null : t(THINKING_LEVEL_DESC_KEYS[lvl]);
+                        : isBinaryLabel ? t("chat.thinkingOn") : t(THINKING_LEVEL_DESC_KEYS[lvl]);
                       const mappedVal = thinkingLevelMap ? thinkingLevelMap[lvl] : undefined;
-                      const displayLabel = isToggleOff ? "off" : isBinaryLabel
-                        ? t(lvl === "off" ? "chat.thinkingOff" : "chat.thinkingOn")
+                      const displayLabel = isToggleOff ? "off" : isBinaryLabel ? "on"
                         : (mappedVal != null && mappedVal !== lvl) ? mappedVal : lvl;
-                      const showOriginal = !isBinaryLabel && mappedVal != null && mappedVal !== lvl;
+                      const showOriginal = !isBinaryLabel && !isToggleOff && mappedVal != null && mappedVal !== lvl;
                       return (
                         <SelectorRow
                           key={lvl}

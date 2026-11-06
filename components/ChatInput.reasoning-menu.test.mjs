@@ -37,11 +37,11 @@ const initializers = Object.fromEntries([
 const qwen = ["off", "low", "medium", "xhigh"];
 
 function harness({ current = "xhigh", saved = null, levels = qwen, toggle = true, levelMap = null,
-  auto = false, openInitially = true, canSave = true, isStreaming = false, locale = "en" } = {}) {
+  auto = false, openInitially = true, canSave = true, isStreaming = false, locale = "en", isMobile = false } = {}) {
   const calls = [];
   let open = openInitially;
   const context = {
-    React, SelectorRow, isMobile: false, controlsMenuOpen: false, isStreaming,
+    React, SelectorRow, isMobile, controlsMenuOpen: false, isStreaming,
     t: (name) => getLocalePlugin(locale).messages[name] ?? name,
     thinkingDropdownRef: { current: null }, thinkingDropdownOpen: open,
     thinkingControlState, defaultThinkingLevelFor,
@@ -67,7 +67,7 @@ function harness({ current = "xhigh", saved = null, levels = qwen, toggle = true
   const rowText = (level) => renderToStaticMarkup(React.createElement(I18nProvider, null, row(level))).replace(/<[^>]*>/g, "");
   const rowColumns = (level) => React.Children.toArray(row(level).props.children)
     .map((column) => renderToStaticMarkup(column).replace(/<[^>]*>/g, ""));
-  return { calls, rows, row, rowLevels, rowText, rowColumns, html, menu, triggerLabel: context.thinkingTriggerLabel,
+  return { calls, rows, row, rowLevels, rowText, rowColumns, html, menu, containerStyle: element.props.style, triggerLabel: context.thinkingTriggerLabel,
     isOpen: () => open, clickTrigger: buttons[0].props.onClick };
 }
 
@@ -88,6 +88,36 @@ test("Qwen's unified menu has contiguous off/efforts with truthful active rows a
       assert.match(html, /aria-label="Default reasoning level for this model"/);
       assert.match(html, /aria-label="Use and save as this model&#x27;s default reasoning level"/);
       assert.doesNotMatch(html, /role="separator"|<hr/);
+    }
+  }
+});
+
+test("binary, Qwen and GPT menus share a spacious minimum width regardless of short labels", () => {
+  for (const locale of ["en", "zh-CN", "zh-TW"]) {
+    for (const canSave of [false, true]) {
+      for (const props of [
+        { levels: ["off", "high"], current: "high" },
+        { levels: qwen, current: "low" },
+        { levels: ["low", "medium", "high", "xhigh", "max"], current: "high", toggle: false },
+      ]) {
+        const h = harness({ ...props, locale, canSave });
+        assert.equal(h.menu.props.style.minWidth, 224);
+        assert.equal(h.menu.props.style.width, undefined, "longer translated or mapped labels can still expand");
+      }
+    }
+  }
+});
+
+test("mobile reasoning menus align to the controls strip's right edge, not the short trigger's left", () => {
+  for (const levels of [qwen, ["off", "high"]]) {
+    for (const canSave of [false, true]) {
+      const mobile = harness({ levels, current: levels[1], isMobile: true, canSave });
+      assert.equal(mobile.containerStyle.position, "static", "anchor to the positioned mobile strip");
+      assert.equal(mobile.menu.props.style.right, 0);
+      assert.equal(mobile.menu.props.style.left, undefined);
+      const desktop = harness({ levels, current: levels[1], canSave });
+      assert.equal(desktop.containerStyle.position, "relative");
+      assert.equal(desktop.menu.props.style.right, 0);
     }
   }
 });
@@ -143,14 +173,14 @@ test("Qwen menu saves off and every effort, closing without a second select call
 });
 
 test("Gemma has only on/off with menu stars and sends the real internal enabled marker", () => {
-  for (const marker of ["medium", "xhigh"]) {
+  for (const marker of ["medium", "high", "xhigh"]) {
     for (const current of ["off", marker]) {
       for (const saved of [null, "off", marker]) {
         const h = harness({ levels: ["off", marker], current, saved, levelMap: { off: "none", [marker]: "internal" } });
         assert.deepEqual(h.rowLevels(), [marker, "off"]);
-        assert.deepEqual(h.rowColumns(marker), ["Reasoning on"]);
-        assert.deepEqual(h.rowColumns("off"), ["Reasoning off"]);
-        assert.equal(h.rowText("off"), "Reasoning off");
+        assert.deepEqual(h.rowColumns(marker), ["on", "Reasoning on"]);
+        assert.deepEqual(h.rowColumns("off"), ["off", "Reasoning off"]);
+        assert.equal(h.triggerLabel, current === "off" ? "off" : "on");
         assert.equal(h.row(current).props.active, true);
         assert.equal(h.rows.every((row) => row.props.star && row.props.gutter), true);
         assert.equal(h.rows.filter((row) => row.props.star.isDefault).length, saved === null ? 0 : 1);
@@ -196,18 +226,18 @@ test("ordinary GPT-style menus retain supported off and its selection/default st
 test("actual unified labels reuse all existing translations, including binary menu rows", () => {
   // I18nProvider SSR always uses English; execute the real label initializers
   // with each registered dictionary rather than pretend SSR hydrated a locale.
-  for (const [locale, effort, off, on] of [
-    ["en", "Reasoning · low", "Reasoning off", "Reasoning on"],
-    ["zh-CN", "推理 · low", "关闭推理", "开启推理"],
-    ["zh-TW", "推理 · low", "關閉推理", "開啟推理"],
+  for (const [locale, off, on] of [
+    ["en", "Reasoning off", "Reasoning on"],
+    ["zh-CN", "关闭推理", "开启推理"],
+    ["zh-TW", "關閉推理", "開啟推理"],
   ]) {
-    assert.equal(harness({ current: "low", locale }).triggerLabel, effort);
-    assert.equal(harness({ current: "off", locale }).triggerLabel, off);
+    assert.equal(harness({ current: "low", locale }).triggerLabel, "low");
+    assert.equal(harness({ current: "off", locale }).triggerLabel, "off");
     const binary = harness({ levels: ["off", "medium"], current: "medium", locale });
-    assert.equal(binary.triggerLabel, on);
-    assert.equal(binary.rowText("medium"), on);
-    assert.deepEqual(binary.rowColumns("medium"), [on]);
-    assert.deepEqual(binary.rowColumns("off"), [off]);
+    assert.equal(binary.triggerLabel, "on");
+    assert.deepEqual(binary.rowColumns("medium"), ["on", on]);
+    assert.deepEqual(binary.rowColumns("off"), ["off", off]);
+    assert.equal(harness({ levels: ["off", "medium"], current: "off", locale }).triggerLabel, "off");
     assert.deepEqual(harness({ current: "off", locale }).rowColumns("off"), ["off", off]);
   }
 });

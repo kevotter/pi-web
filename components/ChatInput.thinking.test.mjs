@@ -29,10 +29,11 @@ function reasoningButton(html) {
 test("Qwen renders one correctly labelled reasoning trigger for each effort/off, including streaming", () => {
   for (const thinkingLevel of ["off", "low", "medium", "xhigh"]) {
     for (const isStreaming of [false, true]) {
-      const label = thinkingLevel === "off" ? "Reasoning off" : `Reasoning · ${thinkingLevel}`;
+      const label = thinkingLevel;
       const html = render({ thinkingLevel, isStreaming, thinkingLevelMap: { off: "none" } });
       const button = reasoningButton(html);
-      assert.ok(button.includes(`title="${label}"`));
+      const title = `${isStreaming ? "Reasoning level for this turn" : "Change reasoning level"}: ${label}`;
+      assert.ok(button.includes(`title="${title}"`));
       assert.ok(button.includes(`>${label}</span>`));
       assert.match(button, /<svg[^>]*width="11"[^>]*height="11"/);
       assert.match(button, /<path d="M9\.5 2A5\.5/);
@@ -41,15 +42,18 @@ test("Qwen renders one correctly labelled reasoning trigger for each effort/off,
   }
 });
 
-test("Gemma uses the same single menu trigger with on/off labels, never the internal medium marker", () => {
-  for (const thinkingLevel of ["off", "medium"]) {
-    for (const isStreaming of [false, true]) {
-      const html = render({ availableThinkingLevels: ["off", "medium"], thinkingLevel, isStreaming });
-      const button = reasoningButton(html);
-      const label = thinkingLevel === "off" ? "Reasoning off" : "Reasoning on";
-      assert.ok(button.includes(`title="${label}"`));
-      assert.ok(button.includes(`>${label}</span>`));
-      assert.doesNotMatch(button, /medium/);
+test("Gemma uses the same compact trigger with on/off labels, never its internal enabled marker", () => {
+  for (const marker of ["medium", "high"]) {
+    for (const thinkingLevel of ["off", marker]) {
+      for (const isStreaming of [false, true]) {
+        const html = render({ availableThinkingLevels: ["off", marker], thinkingLevel, isStreaming });
+        const button = reasoningButton(html);
+        const label = thinkingLevel === "off" ? "off" : "on";
+        const title = `${isStreaming ? "Reasoning level for this turn" : "Change reasoning level"}: ${label}`;
+        assert.ok(button.includes(`title="${title}"`));
+        assert.ok(button.includes(`>${label}</span>`));
+        assert.doesNotMatch(button, /medium|high/);
+      }
     }
   }
 });
@@ -85,5 +89,5 @@ test("missing off support or capability retains the ordinary reasoning picker", 
 
 test("unified trigger retains supported wire effort labels", () => {
   const mapped = reasoningButton(render({ thinkingLevel: "xhigh", thinkingLevelMap: { xhigh: "maximum" } }));
-  assert.match(mapped, />Reasoning · maximum<\/span>/);
+  assert.match(mapped, />maximum<\/span>/);
 });
