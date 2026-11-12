@@ -1,6 +1,6 @@
 # Fork customizations
 
-This fork retains the upstream Pi Web package name and version. Its upstream release base is **v0.15.0**, commit `f130910abf662b506b2ef2f475fc21a2fe57badc` (`f130910`), with the local customizations below retained.
+This fork retains the upstream Pi Web package name and version. Its upstream release base is **v0.15.0**, commit `f130910abf662b506b2ef2f475fc21a2fe57badc` (`f130910`). It also includes upstream main through `b96b28b9ced615db0ad847f9c77c7dab1902bedb` (`b96b28b`), with the local customizations below retained. This post-release snapshot is not a new upstream release.
 
 ## Application changes
 
