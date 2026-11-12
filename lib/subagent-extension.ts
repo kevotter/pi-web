@@ -458,7 +458,7 @@ export function createSubagentExtension(
       pi.registerTool(defineTool({
         name: "steer_subagent",
         label: "Steer agent",
-        description: 'Send additional instructions only to a subagent session that is still running. If this returns "Subagent is not running", first retrieve its completion result with get_subagent_result. If more work is needed, use Agent with resume to continue that session.',
+        description: 'Send additional instructions to a running subagent session. Sending to a completed session returns the error "Subagent is not running". If further work is needed, use Agent with resume to continue that session.',
         exposure: SUBAGENT_TOOL_EXPOSURE,
         parameters: Type.Object({
           agent_id: Type.String({ description: "Subagent session ID." }),
