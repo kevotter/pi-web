@@ -60,8 +60,6 @@ export const zhCNLocale: LocalePlugin = {
     "settings.filesPlacementBelow": "会话下方",
     "settings.filesPlacementTab": "单独标签页",
     "settings.filesPlacementDescription": "手机上始终用标签页切换。",
-    "settings.builtinTools": "内置工具",
-    "settings.builtinToolsDescription": "工具菜单选 configured 时，新会话启用这些工具。保存到全局 defaultTools。",
     "settings.shellTool": "Shell 工具",
     "settings.shellToolDescription": "选择模型执行命令时使用的 Shell。直接输入的 ! 和 !! 命令仍使用 Bash。",
     "settings.pushPermission": "后台推送",

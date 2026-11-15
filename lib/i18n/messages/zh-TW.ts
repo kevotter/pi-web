@@ -60,8 +60,6 @@ export const zhTWLocale: LocalePlugin = {
     "settings.filesPlacementBelow": "工作階段下方",
     "settings.filesPlacementTab": "獨立分頁",
     "settings.filesPlacementDescription": "手機上一律使用分頁切換。",
-    "settings.builtinTools": "內建工具",
-    "settings.builtinToolsDescription": "工具選單選 configured 時，新工作階段啟用這些工具。儲存到全域 defaultTools。",
     "settings.shellTool": "Shell 工具",
     "settings.shellToolDescription": "選擇模型執行命令時使用的 Shell。直接輸入的 ! 和 !! 命令仍使用 Bash。",
     "settings.pushPermission": "背景推送",

@@ -60,8 +60,6 @@ export const enLocale: LocalePlugin = {
     "settings.filesPlacementBelow": "Below sessions",
     "settings.filesPlacementTab": "Separate tab",
     "settings.filesPlacementDescription": "Phones always use tabs.",
-    "settings.builtinTools": "Built-in tools",
-    "settings.builtinToolsDescription": "New sessions on the configured tool preset start with these. Saved to the global defaultTools.",
     "settings.shellTool": "Shell tool",
     "settings.shellToolDescription": "Choose which shell the model uses for commands. Direct ! and !! commands still use Bash.",
     "settings.pushPermission": "Background push",
