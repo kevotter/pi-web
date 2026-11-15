@@ -83,16 +83,22 @@ test("full component SSR shows truthful current states, including hidden configu
   }
 });
 
-test("streaming hides the tools control as upstream, retaining Steer/Follow-up/Stop", () => {
+test("streaming keeps the tools control visible but disabled and gray", () => {
   for (const toolPreset of ["configured", "none", "read-only", "default", "full"]) {
     const html = render({ isStreaming: true, toolPreset });
-    assert.equal(button(html, "Change tool preset"), undefined);
+    const trigger = button(html, "Change tool preset");
+    assert.ok(trigger, "the control must keep its width while sending");
+    assert.match(trigger, /disabled=""/);
+    assert.match(trigger, /opacity:0\.5/);
+    assert.match(trigger, /cursor:not-allowed/);
     assert.ok(button(html, "Steer"));
     assert.ok(button(html, "Follow-up"));
     assert.match(html, /Stop agent/);
     assert.equal(button(html, "Send"), undefined);
-    // A stale open-menu state cannot leak the control into a streaming run.
-    assert.equal(harness({ current: toolPreset, isStreaming: true }).element, false);
+    const h = harness({ current: toolPreset, isStreaming: true, openInitially: false });
+    assert.ok(h.element);
+    h.trigger.props.onClick({});
+    assert.equal(h.isOpen(), false, "a streaming run cannot open the menu");
   }
   assert.equal(harness({ canChange: false }).element, undefined);
 });

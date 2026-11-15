@@ -2824,7 +2824,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 )}
               </div>
             )}
-            {!isStreaming && onToolPresetChange && (
+            {onToolPresetChange && (
               <div ref={toolDropdownRef} style={{
                 // On a phone the menu opens from the strip's right edge, not
                 // the button's: its preset descriptions are wider than the room
@@ -2865,7 +2865,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   </svg>
                   {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>}
                 </button>
-                {toolDropdownOpen && (
+                {toolDropdownOpen && !isStreaming && (
                   <div style={{
                     position: "absolute",
                     bottom: "calc(100% + 6px)",
