@@ -152,11 +152,17 @@ test("the trigger only opens/closes the menu and preserves upstream run-end clic
   assert.deepEqual(guarded.calls, []);
 });
 
-test("tools menu keeps upstream mobile strip anchoring and desktop layout", () => {
+test("tools menu hugs its labels with equal side padding and keeps mobile anchoring", () => {
   for (const isMobile of [false, true]) {
     const h = harness({ isMobile });
     assert.equal(h.containerStyle.position, isMobile ? "static" : "relative");
     assert.equal(h.menu.props.style.right, 0);
     assert.equal(h.menu.props.style.maxWidth, isMobile ? "calc(100vw - 16px)" : undefined);
+    assert.equal(h.menu.props.style.minWidth, undefined, "the menu must not reserve an arbitrary minimum width");
+    for (const row of h.rows) {
+      assert.equal(row.props.style.padding, "7px 12px", "left edge-to-check spacing matches the right inset");
+      const label = React.Children.toArray(row.props.children)[1];
+      assert.equal(label.props.style?.flex, undefined, "the label must not stretch the menu wider");
+    }
   }
 });
