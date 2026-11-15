@@ -2878,10 +2878,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
                       const isActive = (toolPreset ?? "configured") === preset;
-                      let desc: string;
-                      if (lvl === "read") desc = t("chat.readOnlyTools", { count: 4 });
-                      else if (lvl === "build") desc = t("chat.builtInTools", { count: 4 });
-                      else desc = t("chat.allBuiltInTools");
                       return (
                         <button
                           key={lvl}
@@ -2903,7 +2899,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                             ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
                             : <span style={{ width: 10, flexShrink: 0 }} />}
                           <span style={{ flex: 1 }}>{lvl}</span>
-                          <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: 8 }}>{desc}</span>
                         </button>
                       );
                     })}

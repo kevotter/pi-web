@@ -116,23 +116,24 @@ test("actual menu offers only read/build/full, with the unchanged upstream wire 
   assert.deepEqual(getToolNamesForPreset("none"), []);
 });
 
-test("hidden states are localized and never mark build (or any other choice) selected", () => {
-  for (const [locale, configured, none, readDescription, buildDescription, fullDescription] of [
-    ["en", "From Settings", "Chat only", "4 read-only built-in tools", "4 built-in tools", "All built-in tools"],
-    ["zh-CN", "取自设置", "仅聊天", "4 个只读内置工具", "4 个内置工具", "全部内置工具"],
-    ["zh-TW", "取自設定", "僅聊天", "4 個只讀內建工具", "4 個內建工具", "全部內建工具"],
+test("hidden states are localized, never mark a choice selected, and show no hint text", () => {
+  for (const [locale, configured, none] of [
+    ["en", "From Settings", "Chat only"],
+    ["zh-CN", "取自设置", "仅聊天"],
+    ["zh-TW", "取自設定", "僅聊天"],
   ]) {
     for (const [current, label] of [[undefined, configured], ["configured", configured], ["none", none]]) {
       const h = harness({ current, locale });
       assert.equal(h.label, label);
       assert.equal(h.rows.filter(row => row.props.style.fontWeight === 600).length, 0);
-      assert.deepEqual(h.rows.map(row => React.Children.toArray(row.props.children)[2].props.children),
-        [readDescription, buildDescription, fullDescription]);
+      assert.deepEqual(h.rows.map(row => React.Children.toArray(row.props.children).length), choices.map(() => 2));
+      assert.doesNotMatch(h.html(), /built-in tools|内置工具|內建工具/);
       assert.doesNotMatch(h.html(), /<polyline/);
     }
     for (const [index, [, current]] of choices.entries()) {
       const h = harness({ current, locale });
       assert.deepEqual(h.rows.map(row => row.props.style.fontWeight === 600), choices.map((_, i) => i === index));
+      assert.deepEqual(h.rows.map(row => React.Children.toArray(row.props.children)[1].props.children), ["read", "build", "full"]);
     }
   }
 });
