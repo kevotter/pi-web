@@ -166,7 +166,7 @@ test("tools menu hugs its labels with equal side padding and keeps mobile anchor
     assert.equal(h.menu.props.style.maxWidth, isMobile ? "calc(100vw - 16px)" : undefined);
     assert.equal(h.menu.props.style.minWidth, undefined, "the menu must not reserve an arbitrary minimum width");
     for (const row of h.rows) {
-      assert.equal(row.props.style.padding, "7px 12px", "left edge-to-check spacing matches the right inset");
+      assert.equal(row.props.style.padding, "7px 30px 7px 12px", "the right inset matches the text start after the check gutter");
       const label = React.Children.toArray(row.props.children)[1];
       assert.equal(label.props.style?.flex, undefined, "the label must not stretch the menu wider");
     }
