@@ -26,7 +26,7 @@ globalThis.EventSource = class {
   close() { this.readyState = 2; }
 };
 
-async function setup({ existing = false, defaults = { [key(gpt)]: "high", [key(qwen)]: "low" }, pins = {}, saveGate, saveError, fallback = "medium", creationGate, modelGate, modelAckGates = {}, thinkingGates = {}, detailGate, failCommand, staleDefaults, backgroundReadGate, backgroundStateGate, agentReadGate, agentFullState, canonicalFailure, reselectLevel, effortReadGate, lostModelReply = false, hookImplementation = useAgentSession, renderImplementation = renderHook } = {}) {
+async function setup({ preferences = new Map(), existing = false, defaults = { [key(gpt)]: "high", [key(qwen)]: "low" }, pins = {}, saveGate, saveError, fallback = "medium", creationGate, modelGate, modelAckGates = {}, thinkingGates = {}, detailGate, failCommand, staleDefaults, backgroundReadGate, backgroundStateGate, agentReadGate, agentFullState, canonicalFailure, reselectLevel, effortReadGate, toolReadGate, lostModelReply = false, hookImplementation = useAgentSession, renderImplementation = renderHook } = {}) {
   let catalog = {
     models: {}, modelList: [gpt, qwen, gemma].map(({ provider, modelId }) => ({ provider, id: modelId, name: modelId })),
     defaultModel: gpt, defaultThinkingLevel: defaults[key(gpt)] ?? "medium",
@@ -45,7 +45,6 @@ async function setup({ existing = false, defaults = { [key(gpt)]: "high", [key(q
   let sessionTools = null;
   // Deliberately stale SDK settings: a live wrapper does not learn star writes by itself.
   const wrapperDefaults = { ...defaults, ...staleDefaults };
-  const preferences = new Map([["pi-tool-preset", "full"]]);
   window.localStorage = { getItem: (k) => preferences.get(k) ?? null, setItem: (k, v) => preferences.set(k, v) };
   globalThis.fetch = async (url, init = {}) => {
     if (url === "/api/agent/model-defaults/lease" && init.method === "POST") {
@@ -124,8 +123,12 @@ async function setup({ existing = false, defaults = { [key(gpt)]: "high", [key(q
         if (thinkingGates[body.level]) await thinkingGates[body.level].promise;
       }
       if (body.type === "prompt") prompts.push({ model: serverModel, level: serverLevel });
+      if (body.type === "set_tools") sessionTools = body.toolNames;
       if (body.type === "get_state") data = { model: { ...serverModel, id: serverModel.modelId }, thinkingLevel: serverLevel };
-      if (body.type === "get_tools") data = (sessionTools ?? ["read", "bash", "edit", "write"]).map((name) => ({ name, active: true }));
+      if (body.type === "get_tools") {
+        data = (sessionTools ?? ["read", "bash", "edit", "write"]).map((name) => ({ name, active: true }));
+        if (toolReadGate) await toolReadGate.promise;
+      }
       return Response.json({ success: true, data });
     }
     unexpected.push(`${init.method ?? "GET"} ${url}`);
@@ -196,7 +199,7 @@ test("off is a model-bound default for both Qwen and Gemma", async () => {
   } finally { hook.unmount(); }
 });
 
-test("starting a fresh chat sends its selected model and build tools, without turning resolved effort into an override", async () => {
+test("starting a fresh chat sends its selected model and build tools without overriding resolved effort", async () => {
   const { hook, creations, serverLevel, initialize } = await setup();
   try {
     await hook.result.handleModelChange(qwen.provider, qwen.modelId); hook.flush();
@@ -249,18 +252,38 @@ test("failed star saves do not move the marker or overwrite a temporary selectio
   } finally { hook.unmount(); }
 });
 
-test("tool changes affect this chat only; remounting a fresh chat starts in build", async () => {
+test("tool changes keep reasoning defaults separate and seed the next fresh chat's preset", async () => {
   const { hook, preferences, writes } = await setup();
   try {
     await hook.result.handleToolPresetChange("full"); hook.flush();
     assert.equal(hook.result.toolPreset, "full");
-    assert.equal(preferences.get("pi-tool-preset"), "full", "legacy browser data is neither read nor rewritten");
-    assert.deepEqual(writes, []);
+    assert.equal(preferences.get("pi-tool-preset"), "full");
+    assert.deepEqual(writes, [], "tool choices do not write model or reasoning defaults");
   } finally { hook.unmount(); }
-  const fresh = await setup();
-  try { assert.equal(fresh.hook.result.toolPreset, "default"); }
+  const fresh = await setup({ preferences });
+  try { assert.equal(fresh.hook.result.toolPreset, "full"); }
   finally { fresh.hook.unmount(); }
 });
+
+for (const edit of ["effort", "model"]) {
+  test(`a delayed tool refresh cannot undo a confirmed ${edit} change`, async () => {
+    const toolReadGate = Promise.withResolvers();
+    const { hook, commands } = await setup({ existing: true, toolReadGate });
+    try {
+      const switching = hook.result.handleToolPresetChange("read-only");
+      await settle(); hook.flush();
+      assert.ok(commands.some((command) => command.type === "get_state"));
+      assert.ok(commands.some((command) => command.type === "get_tools"));
+      if (edit === "effort") await hook.result.handleThinkingLevelChange("low");
+      else await hook.result.handleModelChange(qwen.provider, qwen.modelId);
+      hook.flush();
+      toolReadGate.resolve(); await switching; hook.flush();
+      assert.equal(hook.result.thinkingLevel, "low", "the stale get_state cannot restore the earlier effort");
+      assert.deepEqual(hook.result.displayModel, edit === "model" ? qwen : gpt);
+      assert.equal(hook.result.toolPreset, "read-only");
+    } finally { toolReadGate.resolve(); hook.unmount(); }
+  });
+}
 
 test("resolution keeps exact provider keys, pins and global fallback separate and clamps like pi", () => {
   const supported = ["off", "low", "medium", "xhigh"];

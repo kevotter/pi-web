@@ -88,7 +88,7 @@ for (const stage of ["mounted", "creating", "connecting", "prompting"]) {
     const result = await sendAndSwitch(stage);
     assert.deepEqual(result.commands, ["prompt"]);
     assert.deepEqual(result.created, ["s1"]);
-    assert.deepEqual(result.creationRequests[0].toolNames, ["read", "bash", "edit", "write"], "new chats explicitly start in build, not settings.json defaults");
+    assert.deepEqual(result.creationRequests[0].toolNames, ["read", "bash", "edit", "write"], "the first fresh chat explicitly starts in build");
   });
 }
 

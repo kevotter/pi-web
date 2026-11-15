@@ -10,13 +10,15 @@
 
 import { getCurrentTools } from "@earendil-works/pi-ai";
 import { SIDE_BOUNDARY_MESSAGE_TYPE } from "./session-family";
-import { localToolPolicy, preserveAllowedToolOrder } from "./local-tool-modes";
 import type { SessionEntry } from "./types";
 
 export const SIDE_META_TYPE = "pi-web:side";
 
 /** The tools a side chat may keep of its parent's. */
 export const SIDE_TOOLS: readonly string[] = ["read", "bash", "powershell", "grep", "find", "ls"];
+
+/** What pi's default tools leave when a parent recorded no tools (older transcripts). */
+const SIDE_FALLBACK_TOOLS: readonly string[] = ["read", "bash"];
 
 /**
  * What the model reads at the end of the inherited history. pi sends a custom
@@ -85,16 +87,15 @@ export function sideOwnEntries<T extends { timestamp?: string }>(entries: readon
 /**
  * A side chat's tools, which `startRpcSession()` passes as pi's allow-list, so
  * nothing else registers, every extension, MCP, Code mode and subagent tool
- * included: the parent's pin, or local build when unpinned, cut down to
- * `SIDE_TOOLS`. A stale recorded loadout cannot override the local default.
- * Read-only parents stay without a shell. New side chats persist the effective
- * pin; older unpinned copies use the same local fallback on reopen.
+ * included: the ones its transcript gives it, a pin first, then the loadout pi
+ * recorded, cut down to `SIDE_TOOLS`. Never more than the parent had, so a
+ * Read-only parent stays without a shell. Reopening reads the same answer back
+ * from the side chat's own transcript.
  */
 export function sideToolNames(
   pinned: readonly string[] | undefined,
   systemMessages: Parameters<typeof getCurrentTools>[0],
 ): string[] {
-  const allowed = (pinned ?? localToolPolicy(undefined, []).builtins).filter((name) => SIDE_TOOLS.includes(name));
-  const recorded = getCurrentTools(systemMessages).map((tool) => tool.name);
-  return preserveAllowedToolOrder(allowed, recorded);
+  const recorded = systemMessages.length > 0 ? getCurrentTools(systemMessages).map((tool) => tool.name) : undefined;
+  return (pinned ?? recorded ?? SIDE_FALLBACK_TOOLS).filter((name) => SIDE_TOOLS.includes(name));
 }

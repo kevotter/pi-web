@@ -13,32 +13,34 @@ export const CONCRETE_TOOL_PRESET_VALUES = ["none", "read-only", "default", "ful
 export type ConcreteToolPreset = typeof CONCRETE_TOOL_PRESET_VALUES[number];
 
 /**
- * Legacy "configured" is not a tool list: it sends no override. Keep accepting it
- * for saved browser preferences and API compatibility; ordinary unpinned sessions
- * now use build, not settings.json defaultTools.
+ * "configured" is not a tool list: it means "send no override", so pi resolves the
+ * loadout from settings.json defaultTools exactly like the `pi` CLI does. Sessions
+ * left on it stay unpinned and keep following the setting as it changes.
  */
 export const CONFIGURED_TOOL_PRESET = "configured";
 export const TOOL_PRESET_VALUES = ["configured", "none", "read-only", "default", "full"] as const;
 export type ToolPreset = typeof TOOL_PRESET_VALUES[number];
 
-/** UI names are independent of the persisted/wire preset IDs. */
-export const TOOL_MODE_PRESETS = { plan: "read-only", build: "default", full: "full" } as const;
-export type ToolMode = keyof typeof TOOL_MODE_PRESETS;
-/** Fresh composers and unpinned historical sessions default to build. */
-export const DEFAULT_TOOL_PRESET: ConcreteToolPreset = TOOL_MODE_PRESETS.build;
-export const NEW_SESSION_TOOL_PRESET: ConcreteToolPreset = TOOL_MODE_PRESETS.build;
+/** First-use composer choice only; unpinned/history/API defaults remain upstream. */
+export const NEW_SESSION_TOOL_PRESET: ConcreteToolPreset = "default";
 
-/** Legacy configured/none selections keep their behavior, but show build as before. */
-export function getToolModeLabel(preset: ToolPreset | undefined): ToolMode {
-  if (preset === TOOL_MODE_PRESETS.plan) return "plan";
-  if (preset === TOOL_MODE_PRESETS.full) return "full";
-  return "build";
+/** Menu labels only; wire IDs, configured defaults and historical pins stay upstream. */
+export const TOOL_MODE_PRESETS = { read: "read-only", build: "default", full: "full" } as const;
+export type ToolMode = keyof typeof TOOL_MODE_PRESETS;
+
+export function getToolModeLabel(preset: ToolPreset | undefined): ToolMode | "configured" | "none" {
+  if (preset === "read-only") return "read";
+  if (preset === "default") return "build";
+  if (preset === "full") return "full";
+  return preset ?? CONFIGURED_TOOL_PRESET;
 }
 
 export const PRESET_NONE: string[] = [];
 export const PRESET_READ_ONLY: string[] = ["read", "grep", "find", "ls"];
 export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
 export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
+/** The built-in tools Settings › General switches in the global defaultTools; `bash` is the active shell. */
+export const SETTINGS_BUILTIN_TOOLS: readonly string[] = ["read", "grep", "find", "ls", "edit", "write", "bash"];
 
 const BUILTIN_TOOL_NAMES = new Set([...PRESET_FULL, "powershell"]);
 
@@ -58,11 +60,9 @@ export function getPresetFromTools(tools: ToolEntry[]): ConcreteToolPreset {
 export function getPresetFromToolNames(toolNames: readonly string[]): ConcreteToolPreset {
   if (toolNames.length === 0) return "none";
 
-  // Full activates both registered shells. Canonicalize before deduplicating
-  // so its live loadout cannot be mistaken for build after get_tools.
-  const active = [...new Set(toolNames
+  const active = toolNames
     .map((name) => name === "powershell" ? "bash" : name)
-    .filter((name) => BUILTIN_TOOL_NAMES.has(name)))]
+    .filter((name) => BUILTIN_TOOL_NAMES.has(name))
     .sort()
     .join(",");
 
@@ -72,7 +72,7 @@ export function getPresetFromToolNames(toolNames: readonly string[]): ConcreteTo
   return "default";
 }
 
-/** Undefined is reserved for the legacy configured sentinel; build is always explicit. */
+/** Undefined means "no explicit selection": let pi resolve settings.json defaultTools. */
 export function getToolNamesForPreset(preset: ToolPreset): string[] | undefined {
   if (preset === CONFIGURED_TOOL_PRESET) return undefined;
   if (preset === "none") return [...PRESET_NONE];

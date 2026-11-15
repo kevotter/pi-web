@@ -190,7 +190,7 @@ function agentEndRead({ transform = (text) => text } = {}) {
   const state = setup();
   const history = [], statuses = [], widgets = [], queues = [];
   Object.assign(state.context, {
-    rpcPromptPendingRef: { current: false },
+    rpcPromptPendingRef: { current: false }, endedSessionRef: { current: null },
     setAgentPhase() {}, setRetryInfo() {}, dispatch() {}, onAgentEnd() {}, scheduleEventStreamClose() {},
     setExtensionStatuses: (value) => statuses.push(value), setExtensionWidgets: (value) => widgets.push(value),
     setQueuedMessages: (value) => queues.push(value),
@@ -302,6 +302,7 @@ test("only completed assistant messages trigger an immediate usage read", () => 
       agentRunningRef: { current: true }, sessionIdRef: { current: "a" }, optimisticUserMessageKeyRef: { current: null },
       isSystemMessageEvent: (event) => event.message.role === "system",
       normalizeToolCalls: (message) => message, userMessageKey: () => "user", setMessages() {}, dispatch() {}, setAgentPhase() {},
+      setToolClocks() {}, withoutToolClock: (clocks) => clocks,
       refreshContextUsage: (sid) => reads.push(sid),
     });
     assert.deepEqual(reads, role === "assistant" ? ["a"] : []);
@@ -318,6 +319,7 @@ test("each event stream connection reads usage, since connecting resumes an idle
       sessionIdRef: { current: sid }, sdkAgentActiveRef: { current: false }, agentRunningRef: { current: false },
       agentRunNeedsCompletionRef: { current: false }, agentRunEndRef: { current: { aborted: false } },
       dispatch() {}, cancelEventStreamGrace() {}, setAgentRunning() {}, setAgentPhase() {}, observeSdkAgentRun() {},
+      setToolClocks() {}, endedToolClocks: (clocks) => clocks, NO_TOOL_CLOCKS: new Map(),
       refreshContextUsage: (id) => reads.push(id),
     });
     assert.deepEqual(reads, sid ? [sid] : []);

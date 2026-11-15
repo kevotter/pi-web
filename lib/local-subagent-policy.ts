@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type InlineExtension, type ToolInfo } from "@earendil-works/pi-coding-agent";
-import { localToolPolicy, type LocalToolMode } from "./local-tool-modes";
+import { classifySubagentParentMode, type LocalToolMode } from "./local-subagent-parent-policy";
 import type { SubagentProfile, SubagentSessionResources } from "./subagents";
 
 const BUILTINS = new Set(["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"]);
@@ -12,7 +12,7 @@ const PRECEDENCE = { builtin: 0, global: 1, workspace: 2, project: 3 };
 
 /** Use the parent's persisted selection, not its current active extension tools. No pin means build. */
 export function localSubagentMode(selection: readonly string[] | undefined): LocalToolMode {
-  return localToolPolicy(selection, []).mode;
+  return classifySubagentParentMode(selection);
 }
 
 /**
@@ -114,8 +114,10 @@ export function assertLocalSubagentContinuation(
   profiles: readonly SubagentProfile[],
 ): void {
   const mode = localSubagentMode(selection);
+  if (mode === "none" || mode === "restricted") {
+    throw new Error(`Subagents are disabled in ${mode === "none" ? "Chat only" : "restricted"} mode`);
+  }
   if (mode !== "plan" && mode !== "build") {
-    if (mode === "none") throw new Error("Subagents are disabled in Chat only mode");
     return; // Full never widens an existing restricted child's saved resources.
   }
   const policy = resources?.localPolicy;

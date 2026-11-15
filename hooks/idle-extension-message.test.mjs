@@ -38,6 +38,7 @@ async function setup({ hold = [] } = {}) {
     held: [],
     reads: { full: 0, page: 0, tail: 0, bash: 0, agent: 0 },
     commands: [],
+    toolNames: undefined,
     completions: [],
   };
   const leaf = () => server.leafId ?? server.entries.at(-1)[0];
@@ -76,7 +77,7 @@ async function setup({ hold = [] } = {}) {
       return answer("full", () => {
         const start = Math.max(0, server.entries.length - 2);
         const ids = server.entries.map(([id]) => id).join(",");
-        return { sessionId: "A", filePath: "/A.jsonl", leafId: leaf(), tree: [], treeFormat: "summary", snapshotRevision: `r:${ids}:${leaf()}`, context: context(server.entries.slice(start), start > 0) };
+        return { sessionId: "A", filePath: "/A.jsonl", leafId: leaf(), tree: [], toolNames: server.toolNames, treeFormat: "summary", snapshotRevision: `r:${ids}:${leaf()}`, context: context(server.entries.slice(start), start > 0) };
       });
     }
     if (url.pathname === "/api/sessions/A/context") {
@@ -102,6 +103,9 @@ async function setup({ hold = [] } = {}) {
       const command = JSON.parse(init.body);
       server.commands.push(command);
       if (command.type === "bash") return answer("bash", () => ({ success: true, data: null }));
+      if (command.type === "set_tools") server.toolNames = command.toolNames;
+      if (command.type === "get_state") return json({ success: true, data: { systemPrompt: "fixture prompt" } });
+      if (command.type === "get_tools") return json({ success: true, data: (server.toolNames ?? []).map((name) => ({ name, active: true })) });
       return json({ success: true, data: null });
     }
     return json({ running: false, state: { isStreaming: false, isPromptRunning: false } });
@@ -165,23 +169,25 @@ test("an idle message appends after the window and keeps the pages loaded above"
   }
 });
 
-test("idle appends and their fallback read preserve the next-Send mode draft without owing completion", async () => {
+test("idle appends and their fallback read preserve the upstream tool pin without owing completion", async () => {
   const env = await setup();
   try {
-    env.hook.result.handleToolPresetChange("read-only");
+    await env.hook.result.handleToolPresetChange("read-only");
     await env.flush();
     await env.post("c1", custom("watcher update"));
     // A newer assistant not seen in the page forces the idle tail's full-read fallback.
     env.server.entries.push(["a9", assistant("elsewhere")]);
     await env.post("c2", custom("another update"));
     assert.equal(env.hook.result.toolPreset, "read-only");
-    assert.deepEqual(env.server.commands, [], "idle messages and mode picks issue no runtime commands");
+    assert.deepEqual(env.server.commands.filter((command) => command.type === "set_tools"), [
+      { type: "set_tools", toolNames: ["read", "grep", "find", "ls"] },
+    ], "the upstream tool selection is applied immediately, not at Send");
     assert.deepEqual(env.server.completions, [], "an extension message alone is not an SDK run");
 
     await env.hook.result.handleSend("/handled");
     await env.flush();
     const prompt = env.server.commands.find((command) => command.type === "prompt");
-    assert.deepEqual(prompt.toolNames, ["read", "grep", "find", "ls"], "only ordinary Send admits the draft mode");
+    assert.equal(prompt.toolNames, undefined, "Send does not reapply the already persisted tool selection");
     await env.emit({ type: "prompt_done" });
     assert.equal(env.hook.result.agentRunning, false);
     assert.deepEqual(env.server.completions, [], "a handled command with no agent_start still owes no alert");

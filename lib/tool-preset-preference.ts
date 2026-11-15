@@ -1,4 +1,4 @@
-import { DEFAULT_TOOL_PRESET, isToolPreset, type ToolPreset } from "./tool-presets";
+import { NEW_SESSION_TOOL_PRESET, isToolPreset, type ToolPreset } from "./tool-presets";
 
 const STORAGE_KEY = "pi-tool-preset";
 
@@ -17,19 +17,19 @@ function getBrowserStorage(): StorageLike | null {
 }
 
 /**
- * Legacy browser preference compatibility, no longer used by useAgentSession.
- * Fresh composers always start in NEW_SESSION_TOOL_PRESET (build); changing the
- * mode is session-scoped. Kept so older explicit values can still round-trip.
+ * Only an explicit pick from the tool dropdown is ever stored, so a missing value
+ * means "never chose". First use starts build; later explicit choices, including
+ * historical configured/Chat-only values, still round-trip without rewriting storage.
  */
 export function getPreferredToolPreset(
   storage: StorageLike | null = getBrowserStorage(),
 ): ToolPreset {
-  if (!storage) return DEFAULT_TOOL_PRESET;
+  if (!storage) return NEW_SESSION_TOOL_PRESET;
   try {
     const value = storage.getItem(STORAGE_KEY);
-    return isToolPreset(value) ? value : DEFAULT_TOOL_PRESET;
+    return isToolPreset(value) ? value : NEW_SESSION_TOOL_PRESET;
   } catch {
-    return DEFAULT_TOOL_PRESET;
+    return NEW_SESSION_TOOL_PRESET;
   }
 }
 

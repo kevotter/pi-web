@@ -3,12 +3,13 @@ import { MCP_EXTENSION_PATH } from "./mcp-command";
 import { readSessionToolSelection } from "./session-tool-selection";
 import { SDK_BUILTIN_TOOLS } from "./subagents";
 import type { SessionEntry } from "./types";
-import { localParentModeGuidance, localToolCallBlockReason, localToolPolicy } from "./local-tool-modes";
 
-// Normal sessions enforce the local plan/build/full policy below. Subagent
-// wrappers retain their profile-scoped MCP policy (ADR 0006). Host subagent
-// controls are identified by SDK source metadata; legacy extras still rely on
-// trusted annotation/description assertions, not a security sandbox.
+// A Read-only session pins coding tools that cannot change anything, but MCP
+// tools stay callable beside them, directly or from a codemode script. While
+// such a selection is pinned, this policy blocks every MCP tool its server
+// does not mark `readOnlyHint: true` (ADR 0006, "Safety → Read-only"). The
+// hint comes from the server: the policy keeps the model from writing through
+// a tool by mistake, it does not defend against a malicious server.
 
 const WRITE_CAPABLE_TOOLS = new Set(["bash", "powershell", "edit", "write"]);
 const MCP_TOOL_PREFIX = "mcp__";
@@ -75,48 +76,19 @@ export function createSubagentMcpPolicyExtension(
   };
 }
 
-export function createReadOnlyMcpPolicyExtension(
-  defaultTools: () => readonly string[] | undefined = () => undefined,
-): InlineExtension {
+export function createReadOnlyMcpPolicyExtension(): InlineExtension {
   return {
     name: READ_ONLY_MCP_POLICY_EXTENSION_NAME,
     hidden: true,
     factory: (pi) => {
-      pi.on("before_agent_start", (event, ctx) => {
-        const policy = localToolPolicy(
-          readSessionToolSelection(ctx.sessionManager.getEntries() as unknown as SessionEntry[]),
-          pi.getAllTools(), pi.getActiveTools(), defaultTools(),
-        );
-        pi.setActiveTools(policy.active);
-        // An earlier handler may have edited selectedTools explicitly; pi gives
-        // that edit precedence over setActiveTools. Reassert both upstream paths.
-        event.systemPromptOptions.selectedTools = pi.getActiveTools();
-        const guideline = localParentModeGuidance(policy.mode);
-        if (guideline) {
-          // A replacement SYSTEM.md omits the SDK's rules section. Its custom
-          // sections still render, so keep the parent policy visible there too.
-          // Do not rewrite forceSystemPrompt: a trusted extension's exact prompt
-          // intentionally replaces all sections (as Chat-only/profiles require).
-          if (event.systemPromptOptions.customPrompt) {
-            event.systemPromptOptions.sections.pi_web_local_mode = guideline;
-          } else {
-            event.systemPromptOptions.promptGuidelines.push(guideline);
-          }
-        }
-      });
-      // Every call, not merely MCP: deferred/codemode tools remain callable
-      // when undeclared. Custom-message-triggered runs also pass this guard.
+      // Nested calls (a codemode script's) pass through tool_call as well, with parentToolCallId set.
       pi.on("tool_call", (event, ctx) => {
-        const tools = pi.getAllTools();
+        const tool = pi.getAllTools().find((candidate) => candidate.name === event.toolName);
+        if (!tool || !isMcpTool(tool) || tool.annotations?.readOnlyHint === true) return undefined;
+        // Read last: most calls are not MCP calls, and the selection scan walks the session.
         const selection = readSessionToolSelection(ctx.sessionManager.getEntries() as unknown as SessionEntry[]);
-        const policy = localToolPolicy(selection, tools, pi.getActiveTools(), defaultTools());
-        const reason = localToolCallBlockReason(policy, tools, event.toolName, event.input);
-        if (reason) return { block: true, reason };
-        const tool = tools.find((candidate) => candidate.name === event.toolName);
-        if (tool && isMcpTool(tool) && tool.annotations?.readOnlyHint !== true && isReadOnlySelection(selection)) {
-          return { block: true, reason: readOnlyMcpBlockReason(event.toolName) };
-        }
-        return undefined;
+        if (!isReadOnlySelection(selection)) return undefined;
+        return { block: true, reason: readOnlyMcpBlockReason(event.toolName) };
       });
     },
   };

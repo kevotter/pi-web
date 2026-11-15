@@ -13,7 +13,7 @@ import {
 } from "./subagents";
 import { MAX_SUBAGENT_INPUT_BYTES, MAX_SUBAGENT_INPUT_FILES } from "./subagent-input";
 import { worktreeHasUncommittedFiles } from "./worktree";
-import { HOST_SUBAGENT_EXTENSION_PATH, type LocalToolMode } from "./local-tool-modes";
+import { HOST_SUBAGENT_EXTENSION_PATH, type LocalToolMode } from "./local-subagent-parent-policy";
 import { localSubagentBuiltins } from "./local-subagent-policy";
 
 export const HOST_SUBAGENT_EXTENSION_NAME = "pi-web-subagents";
@@ -290,7 +290,7 @@ export function createSubagentExtension(
         exposure: SUBAGENT_TOOL_EXPOSURE,
         executionMode: "parallel",
         parameters: Type.Object({
-          subagent_type: Type.Optional(Type.String({ description: "Configured agent profile. See Available agent types in the tool description. Defaults to scout in plan, worker in build, and general-purpose in full; specify a profile if that default is unavailable." })),
+          subagent_type: Type.Optional(Type.String({ description: "Configured agent profile. See Available agent types in the tool description. Defaults to scout in read-only, worker in build, and general-purpose in full; specify a profile if that default is unavailable." })),
           prompt: Type.String({ description: "The complete task for the subagent." }),
           resume: Type.Optional(Type.String({ description: "Existing session ID to continue with its current profile, model, thinking, and context. Omit new-session options." })),
           input_files: Type.Optional(Type.Array(Type.String(), {

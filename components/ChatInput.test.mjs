@@ -11,7 +11,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, RUN_END_CLICK_GUARD_MS, autoGrowTextarea, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, isRunEndStrayClick, modelSupportsImageInput, offersBuiltinSlashCommandWhileStreaming, replaceLinksWithMarkdown, readImageFile, replaceTextareaRange, stacksComposerLayout, submitsSlashCommandOnEnter } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, RUN_END_CLICK_GUARD_MS, autoGrowTextarea, scrollTextareaCaretIntoView, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, isRunEndStrayClick, modelSupportsImageInput, offersBuiltinSlashCommandWhileStreaming, replaceLinksWithMarkdown, readImageFile, replaceTextareaRange, stacksComposerLayout, submitsSlashCommandOnEnter } = await jiti.import("./ChatInput.tsx");
 const { isBareMcpCommand } = await jiti.import("@/lib/mcp-command");
 const { ModelSelector } = await jiti.import("./ModelSelector.tsx");
 // As ChatInput.tsx imports it: on Windows jiti loads "@/lib/draft-store.ts"
@@ -97,6 +97,10 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
     ["Ctrl+Enter mode: Enter completes an exact slash command instead of sending it", {}, { enterSendMode: "ctrlEnter", isStreaming: false, slashMenuOpen: true, slashQuery: "copy", value: "/copy", displayedSlashCommands: [{ name: "copy", source: "builtin" }] }, "slash"],
     ["Ctrl+Enter mode: Ctrl+Enter sends an exact slash command", { ctrlKey: true }, { enterSendMode: "ctrlEnter", isStreaming: false, slashMenuOpen: true, slashQuery: "copy", value: "/copy", displayedSlashCommands: [{ name: "copy", source: "builtin" }] }, "send"],
     ["mobile ignores Ctrl+Enter mode for plain Enter", {}, { enterSendMode: "ctrlEnter", isMobile: true }, "native"],
+    // An extension's dialog hides the menus (#1678): Enter must not pick from one the user cannot see.
+    ["an open extension dialog hides slash completion", {}, { isStreaming: false, extensionUiOpen: true, slashMenuOpen: true, slashQuery: "help" }, "send"],
+    ["an open extension dialog hides file completion", {}, { isStreaming: false, extensionUiOpen: true, atMenuOpen: true, atQuery: {} }, "send"],
+    ["an open extension dialog hides history selection", {}, { isStreaming: false, extensionUiOpen: true, historyMenuOpen: true }, "send"],
   ];
   for (const [name, keys, state, expected] of cases) {
     let action = "native";
@@ -105,6 +109,7 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
       COMPOSITION_END_ENTER_GRACE_MS: 100,
       isMobile: false, isStreaming: true, enterSendMode: "enter",
       isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
+      extensionUiOpen: false,
       historyMenuOpen: false, inputHistory: ["previous"], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [{}], slashActiveIndex: 0,
       atMenuOpen: false, atQuery: null, atMatches: [{}], atActiveIndex: 0,
@@ -297,6 +302,7 @@ test("file mention arrows wrap around the match list", () => {
       COMPOSITION_END_ENTER_GRACE_MS: 100,
       isMobile: false, isStreaming: false, enterSendMode: "enter",
       isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
+      extensionUiOpen: false,
       historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
       atMenuOpen: true, atQuery: {}, atMatches: Array.from({ length }, () => ({})), atActiveIndex,
@@ -450,7 +456,7 @@ test("keeps the model selector visible when a model error leaves no options", ()
   assert.match(html, /title="No available models"/);
 });
 
-test("renders the read-only wire preset as plan", () => {
+test("renders the read-only wire preset as read", () => {
   const html = renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -465,11 +471,11 @@ test("renders the read-only wire preset as plan", () => {
     ),
   );
 
-  assert.match(html, /title="Change tool preset: plan"/);
-  assert.match(html, />plan<\/span>/);
+  assert.match(html, /title="Change tool preset: read"/);
+  assert.match(html, />read<\/span>/);
 });
 
-test("renders the legacy empty tool preset with the compatible build label", () => {
+test("renders the legacy empty tool preset truthfully as Chat only", () => {
   const html = renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -484,70 +490,17 @@ test("renders the legacy empty tool preset with the compatible build label", () 
     ),
   );
 
-  assert.match(html, /title="Change tool preset: build"/);
-  assert.match(html, />build<\/span>/);
+  assert.match(html, /title="Change tool preset: Chat only"/);
+  assert.match(html, />Chat only<\/span>/);
 });
 
-test("defaults the preset button to build and shows full without changing wire IDs", () => {
-  for (const [preset, label] of [[undefined, "build"], ["configured", "build"], ["default", "build"], ["full", "full"]]) {
+test("defaults the preset button to From Settings and shows build/full without changing wire IDs", () => {
+  for (const [preset, label] of [[undefined, "From Settings"], ["configured", "From Settings"], ["default", "build"], ["full", "full"]]) {
     const html = renderToStaticMarkup(React.createElement(I18nProvider, null, React.createElement(ChatInput, {
       onSend() {}, onAbort() {}, onToolPresetChange() {}, isStreaming: false, toolPreset: preset,
     })));
     assert.ok(html.includes(`title="Change tool preset: ${label}"`));
   }
-});
-
-test("the actual menu offers only plan/build/full with concise localized descriptions", async () => {
-  const { TOOL_MODE_PRESETS } = await jiti.import("@/lib/tool-presets.ts");
-  const { getLocalePlugin } = await jiti.import("@/lib/i18n/registry.ts");
-  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findMenu(node) {
-    if (ts.isCallExpression(node) && node.expression.getText(source) === "TOOL_PRESETS.map") return node.arguments[0];
-    return ts.forEachChild(node, findMenu);
-  }
-  // Exercise the actual rendered menu rows and their click handlers, without
-  // forcing every unrelated composer dropdown open through React internals.
-  const callback = new Script(ts.transpileModule(`(${findMenu(source).getText(source)})`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },
-  }).outputText);
-  for (const [locale, descriptions] of [
-    ["en", ["Read only", "Edit & run", "All tools"]],
-    ["zh-CN", ["只读规划", "编辑执行", "全部工具"]],
-    ["zh-TW", ["唯讀規劃", "編輯執行", "全部工具"]],
-  ]) {
-    const selected = [];
-    const row = callback.runInNewContext({
-      React, TOOL_MODE_PRESETS, toolPreset: "none",
-      t: (key) => getLocalePlugin(locale).messages[key],
-      setToolDropdownOpen() {}, onToolPresetChange: (preset) => selected.push(preset),
-    });
-    const modes = Object.keys(TOOL_MODE_PRESETS);
-    assert.deepEqual(modes, ["plan", "build", "full"]);
-    for (const [index, mode] of modes.entries()) {
-      const element = row(mode);
-      const html = renderToStaticMarkup(element);
-      assert.ok(html.includes(`>${mode}</span>`));
-      assert.ok(html.includes(`>${descriptions[index].replaceAll("&", "&amp;")}</span>`));
-      assert.doesNotMatch(html, /Chat only|configured|read-only/);
-      element.props.onClick();
-    }
-    // In particular, clicking build from a legacy none session must enable the
-    // four built-ins explicitly, not be skipped just because its label is build.
-    assert.deepEqual(selected, ["read-only", "default", "full"]);
-  }
-  // The live full loadout contains both shells: it must keep full selected,
-  // leaving the build row clickable rather than incorrectly marking it active.
-  const { getPresetFromTools, PRESET_FULL } = await jiti.import("@/lib/tool-presets.ts");
-  const toolPreset = getPresetFromTools([...PRESET_FULL, "powershell", "codemode"].map((name) => ({
-    name, description: name, active: true,
-  })));
-  const picked = [];
-  const row = callback.runInNewContext({
-    React, TOOL_MODE_PRESETS, toolPreset, t: (key) => getLocalePlugin("en").messages[key],
-    setToolDropdownOpen() {}, onToolPresetChange: (preset) => picked.push(preset),
-  });
-  row("build").props.onClick();
-  assert.deepEqual(picked, ["default"]);
 });
 
 test("renders the compact composer with the standard Send button and no session controls", () => {
@@ -771,6 +724,9 @@ test("locks built-in command submission until it settles", async () => {
     attachedImages: [],
     attachedImagesRef: { current: [] },
     builtinCommandPendingRef: { current: false },
+    builtinCommandFocusRef: { current: null },
+    textareaRef: { current: null },
+    document: { activeElement: {} },
     canClearBuiltinCommandInput,
     clearInput() {},
     onBuiltinCommand: async () => new Promise((resolve) => { callback.resolve = resolve; }),
@@ -1164,6 +1120,7 @@ test("grows the composer to its text and hides the scrollbar until the text is t
   const fake = (value, scrollHeight, clientHeight) => ({
     value,
     style: { height: "", overflowY: "" },
+    scrollTop: 0,
     get scrollHeight() { return scrollHeight; },
     clientHeight,
   });
@@ -1182,4 +1139,46 @@ test("grows the composer to its text and hides the scrollbar until the text is t
   autoGrowTextarea(tall);
   assert.equal(tall.style.height, "200px", "the box caps at 200 px");
   assert.equal(tall.style.overflowY, "auto", "capped text scrolls");
+});
+
+test("a capped composer keeps its scroll while it regrows, so a caret at the end stays visible", () => {
+  // As a browser does: an "auto" height fits the whole text, which clamps
+  // scrollTop to 0.
+  const fake = (value, scrollHeight, clientHeight) => {
+    let height = "";
+    const ta = {
+      value,
+      style: {
+        overflowY: "",
+        get height() { return height; },
+        set height(next) { height = next; if (next === "auto") ta.scrollTop = 0; },
+      },
+      scrollTop: 40,
+      get scrollHeight() { return scrollHeight; },
+      clientHeight,
+    };
+    return ta;
+  };
+
+  const tall = fake("lots of lines", 320, 24);
+  autoGrowTextarea(tall);
+  assert.equal(tall.style.height, "200px");
+  assert.equal(tall.scrollTop, 40, "the auto-height reset does not leave the box scrolled back to the top");
+});
+
+test("a programmatic caret at the end scrolls an overflowing box to its bottom, a mid-text caret does not", () => {
+  const fake = (value, selectionEnd, scrollHeight) => ({
+    value,
+    selectionEnd,
+    scrollTop: 0,
+    get scrollHeight() { return scrollHeight; },
+  });
+
+  const atEnd = fake("many\nlines", 10, 320);
+  scrollTextareaCaretIntoView(atEnd);
+  assert.equal(atEnd.scrollTop, 320, "a caret at the very end scrolls to the bottom");
+
+  const mid = fake("many\nlines", 3, 320);
+  scrollTextareaCaretIntoView(mid);
+  assert.equal(mid.scrollTop, 0, "a mid-text caret leaves the scroll alone");
 });

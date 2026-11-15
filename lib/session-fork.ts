@@ -2,7 +2,6 @@ import { randomBytes, randomUUID } from "crypto";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { forkSessionName, sessionDisplayTitle } from "./session-fork-name";
-import { localToolPolicy } from "./local-tool-modes";
 import { scanSessionFileInfo } from "./session-list-scanner";
 import { readSubagentRun } from "./subagents";
 import { SIDE_SESSION_NAME } from "./session-family";
@@ -96,12 +95,9 @@ export function createSideSession(
   const metadata = createSideMetadataEntry(copy.sourceSessionId, `side-${randomUUID()}`, firstEntry.parentId ?? null);
   firstEntry.parentId = metadata.id;
   const leaf = JSON.parse(rest.at(-1) ?? first) as { id: string };
-  // No pin (including a cleared one) means local build, not an old branch's
-  // recorded loadout. Always persist it so inherited pins cannot win on reopen.
-  const selection = copy.toolSelection ?? localToolPolicy(undefined, []).builtins;
-  const pin = createSessionToolSelectionEntry(selection, `side-tools-${randomUUID()}`, leaf.id);
-  const boundary = createSideBoundaryEntry(`side-boundary-${randomUUID()}`, pin.id);
-  const added = [pin, boundary].map((entry) => JSON.stringify(entry));
+  const pin = copy.toolSelection && createSessionToolSelectionEntry(copy.toolSelection, `side-tools-${randomUUID()}`, leaf.id);
+  const boundary = createSideBoundaryEntry(`side-boundary-${randomUUID()}`, pin?.id ?? leaf.id);
+  const added = [...(pin ? [pin] : []), boundary].map((entry) => JSON.stringify(entry));
   writeFileSync(copy.path, [header, JSON.stringify(metadata), JSON.stringify(firstEntry), ...rest, ...added].join("\n") + "\n", { encoding: "utf8" });
   return { sessionId: copy.sessionId, path: copy.path };
 }

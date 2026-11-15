@@ -10,7 +10,7 @@ export interface SessionToolSelectionData {
 }
 
 /**
- * Written when the user clears a pin (ordinary sessions then use local build). The session
+ * Written when the user returns a session to pi's configured defaults. The session
  * log is append-only, so an earlier pin can only be retracted by a later entry that
  * says so; without it the newest pin would win forever (#700).
  */
@@ -37,7 +37,7 @@ function parseToolSelectionData(data: unknown): string[] | typeof CLEARED | unde
 /**
  * Return the newest valid persisted selection. Undefined means the session carries no
  * selection of its own - legacy sessions, sessions created without an override, and
- * sessions whose pin was explicitly cleared all resolve that way.
+ * sessions explicitly returned to the configured defaults all resolve that way.
  */
 export function readSessionToolSelection(entries: readonly SessionEntry[]): string[] | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -80,7 +80,7 @@ export function createSessionToolSelectionEntry(tools: readonly string[], id: st
   };
 }
 
-/** Retract any earlier pin; ordinary sessions then use the local build policy. */
+/** Retract any earlier pin so the session follows settings.json defaultTools again. */
 export function appendClearedSessionToolSelection(sessionManager: SessionManager): void {
   sessionManager.appendCustomEntry(TOOL_SELECTION_TYPE, {
     version: 1,

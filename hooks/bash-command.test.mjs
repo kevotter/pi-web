@@ -212,22 +212,18 @@ test("a confirmed effort write superseding held-bash cleanup gets a current read
   });
 });
 
-test("a concurrent ! keeps mode admission local and Stop targets the SDK run before the shell", async () => {
+test("a concurrent ! stays a shell command and Stop targets the SDK run before the shell", async () => {
   await withSetup({ fresh: false }, async (env) => {
     await env.connect();
-    env.hook.result.handleToolPresetChange("read-only");
     await env.hook.result.handleSend("first");
     await env.emit({ type: "agent_start" });
     const shell = env.hook.result.handleSend("!echo MARK");
     await settle();
-    env.hook.result.handleToolPresetChange("full");
-    env.hook.flush();
-    assert.equal(env.hook.result.toolPreset, "read-only", "a run plus shell cannot change the admitted mode");
     await env.hook.result.handleSteer("correction");
     const prompts = env.server.commands.filter((command) => command.type === "prompt");
     assert.equal(prompts.length, 2, "the ! command is not submitted as another model prompt");
-    assert.deepEqual(prompts[0].toolNames, ["read", "grep", "find", "ls"]);
-    assert.equal(prompts[1].toolNames, undefined, "steering inherits the current run rather than admitting a new mode");
+    assert.equal(prompts[0].toolNames, undefined, "ordinary prompts keep the session's tools");
+    assert.equal(prompts[1].toolNames, undefined, "steering keeps the session's tools too");
     assert.equal(env.server.commands.some((command) => command.type === "set_tools"), false);
 
     await env.hook.result.handleAbort();

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
-import { startRpcSession, getRpcSession, setRpcSessionTools, sendRpcSessionPrompt } from "@/lib/rpc-manager";
+import { startRpcSession, getRpcSession, setRpcSessionTools } from "@/lib/rpc-manager";
 import { cwdMissingBody, missingCwdFromBody } from "@/lib/missing-cwd";
 import { EXTENSION_REPORTED_CODE } from "@/lib/agent-client";
 
@@ -38,15 +38,6 @@ export async function POST(
         data: { sessionId: changed.sessionId, recreated: changed.recreated },
       });
     }
-    if (body.type === "prompt" && toolNames !== undefined) {
-      const filePath = existing?.sessionFile || await resolveSessionPath(id) || undefined;
-      if (!existing?.isAlive() && !filePath) {
-        return NextResponse.json({ error: "Session not found", code: "prompt_rejected", accepted: false }, { status: 404 });
-      }
-      const result = await sendRpcSessionPrompt(id, filePath, body);
-      promptAccepted = true;
-      return NextResponse.json({ success: true, data: result });
-    }
     if (existing?.isAlive()) {
       const result = await existing.send(body);
       promptAccepted = body.type === "prompt";
@@ -73,6 +64,7 @@ export async function POST(
   } catch (error) {
     // Read by its fields: the wrapper that threw may come from another route's bundle.
     const missingCwd = missingCwdFromBody(error);
+    const status = (error as { status?: number })?.status;
     return NextResponse.json({
       error: error instanceof Error ? error.message : String(error),
       ...(missingCwd ? cwdMissingBody(missingCwd) : {}),
@@ -80,7 +72,7 @@ export async function POST(
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: 500 });
+    }, { status: status === 404 ? status : 500 });
   }
 }
 
