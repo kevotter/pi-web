@@ -1,8 +1,8 @@
 # Fork customizations
 
-This fork retains the upstream Pi Web package name and version. Its upstream release base is **v0.17.0**, commit `174bff9`.
+This fork retains the upstream Pi Web package name and version. Its upstream release base is **v0.18.0**, commit `2daa0d1`.
 
-**Integration status:** this document describes the v0.17.0 merge candidate and its intended compatibility boundaries. It is not a deployment record or a claim that this candidate has been released, activated, or fully validated.
+**Integration status:** this document describes the v0.18.0 merge candidate and its intended compatibility boundaries. It is not a deployment record or a claim that this candidate has been released, activated, or fully validated.
 
 ## Application changes
 
