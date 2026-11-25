@@ -9,6 +9,7 @@ const jiti = createJiti(import.meta.url, { tsconfigPaths: true, alias: { react: 
 const { renderHook } = await import(shimPath);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
 const { modelThinkingDefault, clampSupportedThinkingLevel } = await jiti.import("../lib/model-thinking-defaults.ts");
+const { clearDraft, getDraft } = await jiti.import("@/lib/draft-store");
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 const gpt = { provider: "remote", modelId: "gpt-6.1-sol" };
 const qwen = { provider: "local", modelId: "qwen3.8-27b" };
@@ -826,6 +827,50 @@ for (const existing of [false, true]) {
       assert.deepEqual(commands.slice(start), [{ type: "set_model", ...gpt }]);
       assert.ok(hook.result.notices.some((notice) => notice.type === "error"));
     } finally { modelGate.resolve(); hook.unmount(); }
+  });
+}
+
+for (const existing of [true, false]) {
+  test(`Stop cancels a prompt still preparing ${existing ? "a model switch" : "its first session"}`, async () => {
+    const gate = Promise.withResolvers();
+    const draftKey = existing ? "model-defaults" : "new:defaults";
+    const state = await setup(existing ? { existing, modelGate: gate } : { creationGate: gate });
+    const { hook, commands, prompts, creations } = state;
+    const images = [{ data: "YQ==", mimeType: "image/png" }];
+    let switching, sending;
+    try {
+      if (existing) switching = hook.result.handleModelChange(qwen.provider, qwen.modelId);
+      sending = hook.result.handleSend("cancel this", images);
+      await settle(); hook.flush();
+      assert.equal(hook.result.agentRunning, true);
+      assert.equal(existing ? commands.some((c) => c.type === "set_model") : creations.length === 1, true);
+      assert.deepEqual(prompts, []);
+
+      // An idle check before dispatch does not own the local pending stage.
+      window.dispatchEvent(new Event("online"));
+      await settle(); hook.flush();
+      assert.equal(hook.result.agentRunning, true);
+      await hook.result.handleAbort();
+      hook.flush();
+      assert.equal(hook.result.agentRunning, false);
+      assert.deepEqual(hook.result.messages, []);
+      assert.deepEqual(getDraft(draftKey), { value: "cancel this", images });
+      assert.equal(commands.some((c) => c.type === "abort"), false);
+
+      gate.resolve();
+      await Promise.all([switching, sending]); hook.flush();
+      assert.deepEqual(prompts, [], "resolving preparation must not release a cancelled prompt");
+      assert.deepEqual(getDraft(draftKey), { value: "cancel this", images }, "restore exactly once");
+      await hook.result.handleSend("explicit retry");
+      assert.equal(prompts.length, 1, "a later send still works");
+      await hook.result.handleAbort();
+      assert.equal(commands.at(-1)?.type, "abort", "an already dispatched send still uses server Stop");
+    } finally {
+      gate.resolve();
+      await Promise.allSettled([switching, sending]);
+      hook.unmount();
+      clearDraft(draftKey);
+    }
   });
 }
 

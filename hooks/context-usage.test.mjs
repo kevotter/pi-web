@@ -22,7 +22,8 @@ function setup({ transform } = {}) {
   const requests = [];
   const context = createContext({
     sessionHookMountedRef: { current: true }, sessionMountGenerationRef: { current: 1 }, sessionIdRef: { current: "a" },
-    promptRunIdRef: { current: 1 }, contextUsageRequestIdRef: { current: 0 }, contextUsageAppliedIdRef: { current: 0 },
+    promptRunIdRef: { current: 1 }, cancelPreparingPromptRef: { current: null },
+    contextUsageRequestIdRef: { current: 0 }, contextUsageAppliedIdRef: { current: 0 },
     sessionReadIdRef: { current: 0 }, sessionReadAppliedIdRef: { current: 0 }, sessionSettingsReadFloorRef: { current: 0 },
     agentRunningRef: { current: true }, sdkAgentActiveRef: { current: true }, rpcPromptPendingRef: { current: true },
     agentRunNeedsCompletionRef: { current: true }, agentRunEndRef: { current: { aborted: false } },

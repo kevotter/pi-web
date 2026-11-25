@@ -636,6 +636,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const displayModelRef = useRef<SelectedModel | null>(null);
   const defaultThinkingLevelRef = useRef<ConcreteThinkingLevel | null>(null);
   const promptRunIdRef = useRef(0);
+  // Until the POST starts, Stop owns the local submission, not a server run.
+  const cancelPreparingPromptRef = useRef<(() => void) | null>(null);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   // The optimistic bubble itself, set with its key.
   const optimisticUserMessageRef = useRef<AgentMessage | null>(null);
@@ -1585,7 +1587,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // its bubble goes, from the view and from the session's cached view. A read of
   // a file the prompt never changed keeps the view's messages (the snapshot
   // revision is the same), so it would never drop the bubble itself.
-  const dropUnconfirmedBubble = useCallback((pending: UnconfirmedSend) => {
+  const dropUnconfirmedBubble = useCallback((pending: Pick<UnconfirmedSend, "sid" | "bubble">) => {
     if (sessionHookMountedRef.current) setMessages((prev) => withoutMessage(prev, pending.bubble));
     const snapshot = getSessionViewSnapshot(pending.sid);
     if (snapshot?.messages.includes(pending.bubble)) {
@@ -1789,7 +1791,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const isCurrent = () => sessionHookMountedRef.current
       && sessionMountGenerationRef.current === generation
       && sessionIdRef.current === sid && promptRunIdRef.current === runId
-      && sdkAgentGenerationRef.current === sdkGeneration;
+      && sdkAgentGenerationRef.current === sdkGeneration && !cancelPreparingPromptRef.current;
     // Extension-injected runs do not advance promptRunId. The SDK lifecycle
     // captured before the idle check must still match after reading history.
     if (!isCurrent()) return;
@@ -1917,7 +1919,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
         return;
       }
-      if (!agentRunningRef.current) return;
+      // The server being idle is expected while this prompt is still local.
+      if (!agentRunningRef.current || cancelPreparingPromptRef.current) return;
       if (state) {
         if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
         if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
@@ -2494,55 +2497,67 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     let sentSessionId: string | null = null;
     let promptRequestStarted = false;
+    let cancelled = false;
+    cancelPreparingPromptRef.current = () => {
+      cancelled = true;
+      cancelPreparingPromptRef.current = null;
+      rpcPromptPendingRef.current = false;
+      const sid = sessionIdRef.current;
+      messagesRef.current = withoutMessage(messagesRef.current, userMsg);
+      if (sid) dropUnconfirmedBubble({ sid, bubble: userMsg });
+      else setMessages((prev) => withoutMessage(prev, userMsg));
+      optimisticUserMessageRef.current = null;
+      optimisticUserMessageKeyRef.current = null;
+      pendingScrollToUserRef.current = false;
+      setPromptAnchorActive(false);
+      restoreSubmission(message, images, composerDraftKey);
+      // Do not tear down a run another client started while this one waited.
+      if (!sdkAgentActiveRef.current) {
+        settleUiStage();
+        if (sid) scheduleEventStreamClose(sid);
+      }
+    };
 
     try {
-      if (isNew && newSessionCwd) {
-        const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current ?? await ensureNewSession();
-
-        if (!sid) throw new Error("Unable to create a session for the prompt");
-        sentSessionId = sid;
-        // A selection made while creation was pending owns the final model and
-        // effort. Do not repeat set_model: stale SDK defaults would undo it.
-        if (await modelSwitchFlightRef.current === false) {
-          throw new Error("Model switch failed; please select the model again before sending.");
-        }
-        // Switching sessions unmounts this composer and closes its stream. The
-        // prompt still goes out, so the new session runs and gets its sidebar
-        // row instead of losing the submitted text (#1146).
-        if (sessionHookMountedRef.current) {
-          await ensureEventsConnected(sid).catch((error) => {
-            if (sessionHookMountedRef.current) throw error;
-          });
-        }
-        promptRequestStarted = true;
-        const queuedAck = await sendAgentCommand<{ queued?: boolean }>(sid, {
-          type: "prompt",
-          message,
-          ...(piImages?.length ? { images: piImages } : {}),
-        });
-        if (queuedAck?.queued) dropOptimisticUserMessage();
-        promoteNewSession(1, message);
+      const newComposer = isNew && Boolean(newSessionCwd);
+      if (newComposer) {
+        sentSessionId = sessionIdRef.current ?? await ensuringNewSessionRef.current ?? await ensureNewSession();
+        if (!sentSessionId) throw new Error("Unable to create a session for the prompt");
       } else if (session) {
         sentSessionId = session.id;
-        if (await modelSwitchFlightRef.current === false) {
-          throw new Error("Model switch failed; please select the model again before sending.");
-        }
-        await ensureEventsConnected(session.id);
-        promptRequestStarted = true;
-        const queuedAck = await sendAgentCommand<{ queued?: boolean }>(session.id, {
-          type: "prompt",
-          message,
-          ...(piImages?.length ? { images: piImages } : {}),
-        });
-        if (queuedAck?.queued) dropOptimisticUserMessage();
       } else {
         throw new Error("No active session for the prompt");
       }
+      if (cancelled) return;
+      // A selection made while creation was pending owns the final model and
+      // effort. Do not repeat set_model: stale SDK defaults would undo it.
+      if (await modelSwitchFlightRef.current === false) {
+        throw new Error("Model switch failed; please select the model again before sending.");
+      }
+      if (cancelled) return;
+      // Switching sessions must not discard an uncancelled first send (#1146).
+      if (!newComposer || sessionHookMountedRef.current) {
+        await ensureEventsConnected(sentSessionId).catch((error) => {
+          if (!newComposer || sessionHookMountedRef.current) throw error;
+        });
+      }
+      if (cancelled) return;
+      cancelPreparingPromptRef.current = null;
+      promptRequestStarted = true;
+      const queuedAck = await sendAgentCommand<{ queued?: boolean }>(sentSessionId, {
+        type: "prompt",
+        message,
+        ...(piImages?.length ? { images: piImages } : {}),
+      });
+      if (queuedAck?.queued) dropOptimisticUserMessage();
+      if (newComposer) promoteNewSession(1, message);
       setPromptMissingCwd(null);
       if (isSlashCommandPrompt && sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
       }
     } catch (e) {
+      if (cancelled) return;
+      if (!promptRequestStarted) cancelPreparingPromptRef.current = null;
       console.error("Failed to send message:", e);
       const definitivelyRejected = !promptRequestStarted || isPromptRejectedError(e);
       // A transport/proxy failure after dispatch is ambiguous: the server may
@@ -2591,7 +2606,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, releaseUnconfirmedSend, cancelEventStreamGrace, closeEvents, composerDraftKey, dispatch, reconcileAgentState, restoreSubmission, editEntryId, setEdit, translate]);
+  }, [isNew, newSessionCwd, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, releaseUnconfirmedSend, cancelEventStreamGrace, closeEvents, composerDraftKey, dispatch, dropUnconfirmedBubble, reconcileAgentState, restoreSubmission, editEntryId, scheduleEventStreamClose, setEdit, settleUiStage, translate]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (bashRunningRef.current) return;
@@ -2679,6 +2694,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [composerDraftKey, opts.chatInputRef, restoreSubmission]);
 
   const handleAbort = useCallback(async () => {
+    const cancelPreparingPrompt = cancelPreparingPromptRef.current;
+    if (cancelPreparingPrompt) {
+      cancelPreparingPrompt();
+      return;
+    }
     const sid = sessionIdRef.current;
     if (!sid) return;
     // Beside a run, Stop stops the run first, as Esc does in pi's TUI; the command next.
