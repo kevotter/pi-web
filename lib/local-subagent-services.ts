@@ -7,8 +7,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { localSubagentExtensionPaths, type LocalSubagentPolicy } from "./local-subagent-policy";
 
-/** Public ResourceLoader adapter: all reload entry points must recheck explicit local files. */
-function guardedLocalResources(loader: ResourceLoader, policy: LocalSubagentPolicy): ResourceLoader {
+/** Public ResourceLoader adapter: apply the same discovery guards at every reload entry point. */
+function guardedLocalResources(loader: ResourceLoader, prepareReload: () => void): ResourceLoader {
   return {
     getExtensions: () => loader.getExtensions(),
     getSkills: () => loader.getSkills(),
@@ -21,7 +21,7 @@ function guardedLocalResources(loader: ResourceLoader, policy: LocalSubagentPoli
     getAppendSystemPromptSources: () => loader.getAppendSystemPromptSources(),
     extendResources: (paths) => loader.extendResources(paths),
     reload: async (options) => {
-      localSubagentExtensionPaths(policy);
+      prepareReload();
       await loader.reload(options);
     },
   };
@@ -32,19 +32,22 @@ function guardedLocalResources(loader: ResourceLoader, policy: LocalSubagentPoli
  * settings manager: noExtensions alone is too late, since SDK package resolution can install
  * configured packages (and run lifecycle scripts) before filtering discovered extensions.
  * The session itself retains its real settings for models, reasoning, shell preferences, etc.
+ * Only project trust is mirrored: the SDK discovers system prompt files even under noContextFiles.
  */
 export async function createLocalSubagentServices(
   options: CreateAgentSessionServicesOptions,
   policy?: LocalSubagentPolicy,
 ): Promise<AgentSessionServices> {
   if (!policy) return createAgentSessionServices(options);
-  if (!options.settingsManager) throw new Error("Local subagent services require session settings");
+  const settingsManager = options.settingsManager;
+  if (!settingsManager) throw new Error("Local subagent services require session settings");
+  const discoverySettings = SettingsManager.inMemory({}, { projectTrusted: settingsManager.isProjectTrusted() });
   const ceiling = { ...policy, builtins: [...policy.builtins] };
   // Validate before the SDK's initial reload too, not just subsequent calls through the adapter.
   const additionalExtensionPaths = localSubagentExtensionPaths(ceiling);
   const services = await createAgentSessionServices({
     ...options,
-    settingsManager: SettingsManager.inMemory({}),
+    settingsManager: discoverySettings,
     resourceLoaderOptions: {
       ...options.resourceLoaderOptions,
       noExtensions: true,
@@ -57,7 +60,10 @@ export async function createLocalSubagentServices(
   });
   return {
     ...services,
-    settingsManager: options.settingsManager,
-    resourceLoader: guardedLocalResources(services.resourceLoader, ceiling),
+    settingsManager,
+    resourceLoader: guardedLocalResources(services.resourceLoader, () => {
+      localSubagentExtensionPaths(ceiling);
+      discoverySettings.setProjectTrusted(settingsManager.isProjectTrusted());
+    }),
   };
 }
