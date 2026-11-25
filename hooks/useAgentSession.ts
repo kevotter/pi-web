@@ -665,6 +665,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadFlightsRef = useRef(new Map<string, Promise<unknown>>());
   const sessionReadIdRef = useRef(0);
   const sessionReadAppliedIdRef = useRef(0);
+  // Record a current 404 before React commits the cleared view, including for unmount.
+  const missingHistorySessionRef = useRef<string | null>(null);
   // Confirmed model/effort writes invalidate views started before that write,
   // even if the subsequent canonical read fails and advances no applied ID.
   const sessionSettingsReadFloorRef = useRef(0);
@@ -918,18 +920,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!isCurrent()) return null;
       if (res.status === 404) {
         sessionReadAppliedIdRef.current = requestId;
-        if (showLoading) {
-          setData(null);
-          setActiveLeafId(null);
-          setMessages([]);
-          setEntryIds([]);
-          setHistoryCursor(null);
-          setHasEarlierMessages(false);
-          setEarlierTurnCount(0);
-          setError(null);
-        }
-        setLoading(false);
+        missingHistorySessionRef.current = sid;
         deleteSessionViewSnapshot(sid);
+        // A warm mount skips the spinner, not authoritative invalidation.
+        setData(null);
+        setActiveLeafId(null);
+        setMessages([]);
+        setEntryIds([]);
+        setHistoryCursor(null);
+        setHasEarlierMessages(false);
+        setEarlierTurnCount(0);
+        setError(null);
+        setLoading(false);
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -945,9 +947,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const cached = getSessionViewSnapshot(sid);
       const revisionUnchanged = Boolean(
         d.snapshotRevision
+        && missingHistorySessionRef.current !== sid
         && cached?.revision === d.snapshotRevision
         && cached.entryIds.length >= (d.context.entryIds ?? []).length,
       );
+      missingHistorySessionRef.current = null;
       const persistedMessages = revisionUnchanged ? messagesRef.current : d.context.messages;
       // Late pre-switch history/state replies cannot undo this newer view.
       // A failed newer read never advances this marker or discards a good one.
@@ -1093,7 +1097,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const res = await fetch(url, { signal: options?.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as { context: SessionData["context"] };
-      if (sessionIdRef.current !== sid || options?.signal?.aborted || !sessionHookMountedRef.current) return;
+      if (sessionIdRef.current !== sid || options?.signal?.aborted || !sessionHookMountedRef.current
+        || missingHistorySessionRef.current === sid) return;
       setHistoryCursor(d.context.oldestEntryId);
       setHasEarlierMessages(d.context.hasMore);
       setEarlierTurnCount(d.context.turnsBefore ?? 0);
@@ -1976,6 +1981,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
    */
   const idleMessageReadWanted = useCallback((sid: string) => (
     sessionHookMountedRef.current && sessionIdRef.current === sid && !agentRunningRef.current
+    && missingHistorySessionRef.current !== sid
   ), []);
   // The leaf an append moved the view to. activeLeafId stays the last full
   // read's, as the tree the navigator finds it in does; /clone copies this one
@@ -3812,7 +3818,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // entry the UI has loaded (paged-in history included).
       const sid = sessionIdRef.current;
       const currentData = dataRef.current;
-      if (sid && currentData && currentData.sessionId === sid && currentData.snapshotRevision) {
+      if (sid && missingHistorySessionRef.current !== sid
+        && currentData && currentData.sessionId === sid && currentData.snapshotRevision) {
         const existing = getSessionViewSnapshot(sid);
         const entryIds = entryIdsRef.current;
         const coverable = !existing || snapshotCoversLoadedEntries(existing, entryIds);

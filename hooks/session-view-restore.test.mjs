@@ -91,3 +91,62 @@ test("a warmed snapshot paints immediately, restores plan, and preserves paged h
     globalThis.EventSource = previousSource;
   }
 });
+
+for (const flushAfter404 of [true, false]) {
+  test(`a warmed session returning 404 stays out of the cache ${flushAfter404 ? "after repaint" : "even before repaint"}`, async (t) => {
+    const previous = { fetch: globalThis.fetch, document: globalThis.document, window: globalThis.window, EventSource: globalThis.EventSource };
+    resetSessionViewCacheForTests();
+    t.after(() => { Object.assign(globalThis, previous); resetSessionViewCacheForTests(); });
+    globalThis.document = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    globalThis.window = new EventTarget();
+    globalThis.EventSource = class {
+      readyState = 0;
+      constructor() { queueMicrotask(() => { this.readyState = 1; this.onmessage?.({ data: JSON.stringify({ type: "connected", isStreaming: false }) }); }); }
+      close() { this.readyState = 2; }
+    };
+    const id = "deleted-warm-view";
+    setSessionViewSnapshot({
+      sessionId: id, revision: "deleted-r1", messages: [{ role: "user", content: "old transcript" }],
+      entryIds: ["old"], leafId: "old", oldestEntryId: "old", hasMore: true, turnsBefore: 3,
+      summaryTree: [], loadedEntryIds: ["old"],
+    });
+    const detail = Promise.withResolvers();
+    const olderPage = Promise.withResolvers();
+    globalThis.fetch = async (url) => {
+      if (url.startsWith(`/api/sessions/${id}?`)) return detail.promise.then(() => new Response(null, { status: 404 }));
+      if (url.startsWith(`/api/sessions/${id}/context?`)) return olderPage.promise;
+      if (url.startsWith("/api/models")) return Response.json({ models: {}, modelList: [] });
+      return Response.json({ running: false });
+    };
+    const props = { session: { id, cwd: "/fixture" } };
+    const hook = renderHook(useAgentSession, props);
+    let open = true;
+    t.after(() => { if (open) hook.unmount(); });
+    hook.flush();
+    assert.equal(hook.result.messages.length, 1, "paint the snapshot while validation is pending");
+    const paging = flushAfter404 ? hook.result.loadContext(id, "old", "old") : null;
+    detail.resolve();
+    await settle();
+    assert.equal(getSessionViewSnapshot(id), null);
+    if (flushAfter404) {
+      olderPage.resolve(Response.json({ context: {
+        messages: [{ role: "user", content: "older history" }], entryIds: ["older"],
+        oldestEntryId: "older", hasMore: true,
+      } }));
+      await paging;
+      hook.flush();
+      assert.deepEqual(hook.result.messages, [], "a stale page cannot refill the cleared view");
+      assert.equal(hook.result.activeLeafId, null);
+      assert.equal(hook.result.hasEarlierMessages, false);
+      assert.equal(hook.result.loading, false);
+    }
+    hook.unmount(); open = false;
+    assert.equal(getSessionViewSnapshot(id), null, "unmount cannot save the rejected snapshot");
+    const reopened = renderHook(useAgentSession, props);
+    try {
+      reopened.flush();
+      assert.deepEqual(reopened.result.messages, [], "reopening never paints the deleted history");
+      await settle();
+    } finally { reopened.unmount(); }
+  });
+}
