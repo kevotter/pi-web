@@ -145,9 +145,10 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     const menu = page.getByRole("menu", { name: "Session actions" });
     await menu.waitFor();
     const items = (await menu.getByRole("menuitem").allInnerTexts()).map((text) => text.split("\n")[0].trim());
-    // After the actions that manage the session, just before Delete; never first (it would take the focus).
-    assert.deepEqual(items.slice(-2), ["Open in new tab", "Delete…"], `menu items: ${items.join(" | ")}`);
-    assert.equal(items[items.length - 3], "Archive", `menu items: ${items.join(" | ")}`);
+    // After the actions that manage the session, beside Insert into chat (which
+    // only adds a chip), just before Delete; never first (it would take the focus).
+    assert.deepEqual(items.slice(-3), ["Insert into chat", "Open in new tab", "Delete…"], `menu items: ${items.join(" | ")}`);
+    assert.equal(items[items.length - 4], "Archive", `menu items: ${items.join(" | ")}`);
     let tab = await newTab(() => menu.getByRole("menuitem", { name: /^Open in new tab/ }).click());
     await expectShows(tab, b.id);
     await expectShows(page, a.id);
@@ -191,7 +192,9 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await link(page, b.id).waitFor();
 
     await row(page, b.id).hover();
-    await row(page, b.id).getByRole("button", { name: "Archive", exact: true }).click();
+    assert.equal(await row(page, b.id).getByRole("button", { name: "Archive", exact: true }).count(), 0, "no one-click Archive on the row");
+    await row(page, b.id).getByRole("button", { name: "More actions" }).click();
+    await menu.getByRole("menuitem", { name: /^Archive\b/ }).click();
     await row(page, b.id).waitFor({ state: "detached" });
     await expectShows(page, a.id);
     await panel(page).locator('[data-row-key="footer-archived"] button').click();
@@ -235,7 +238,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     console.log("PASS: a link to a missing session selects and shows no other session (fresh profile)");
 
     // Keyboard Fork: the copy's row takes focus on its link (the row's first
-    // control), not on its archive button. The copy is deleted afterwards.
+    // control), not on its ⋯ button. The copy is deleted afterwards.
     // The menu from ⋯, as above: Shift+F10 opens no context menu in Chrome on
     // macOS. F is still the key that forks.
     await row(page, b.id).hover();

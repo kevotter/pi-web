@@ -62,6 +62,7 @@ function installRunningSubagent(t) {
     isRunning: () => running,
     sessionFile: `/tmp/${id}.jsonl`,
     inner: {
+      get isStreaming() { return running; },
       sessionManager: { getEntries: () => entries },
       steer: async (message) => { steered.push(message); },
       abort: async () => { aborts += 1; },

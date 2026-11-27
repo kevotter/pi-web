@@ -2,15 +2,11 @@ import { join } from "path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { displaySettingsPath } from "./enabled-models-runtime";
+import { isRecord } from "./is-record";
 import { serializeByKey } from "./key-serializer";
+import { isThinkingLevel } from "./thinking-levels";
 
 const DEFAULT_WRITES = Symbol.for("pi-web.default-preferences-writes");
-
-const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
-export function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return typeof value === "string" && THINKING_LEVELS.has(value as ThinkingLevel);
-}
 
 /** What the model and reasoning selectors' "save as default" action writes. */
 export interface DefaultPreferencesEdit {
@@ -18,10 +14,6 @@ export interface DefaultPreferencesEdit {
   thinkingLevel?: ThinkingLevel;
   /** A startup override for this exact model, not a new global default model. */
   modelThinkingLevel?: { provider: string; modelId: string; level: ThinkingLevel };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isModelReference(value: Record<string, unknown>): value is Record<string, unknown> & { provider: string; modelId: string } {

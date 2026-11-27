@@ -9,7 +9,7 @@ import {
   invalidateSessionManagerCache,
   buildSessionContext,
 } from "@/lib/session-reader";
-import { getRpcSession, renameRpcSession, subagentDisplayStatus } from "@/lib/rpc-manager";
+import { getLiveRpcSession, renameRpcSession, subagentDisplayStatus } from "@/lib/rpc-manager";
 import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
@@ -20,7 +20,8 @@ import { readSubagentRun, readSubagentSessionResources } from "@/lib/subagents";
 import { readSideRelation, sideOwnEntries } from "@/lib/side-session";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
 import { deleteSessions } from "@/lib/session-delete";
-import { attachTranscriptNotices, collectTranscriptNotices, readShowCacheMissNotices, withSessionPrices } from "@/lib/transcript-notices-server";
+import { NOTICE_SETTING_KEYS } from "@/lib/transcript-notices";
+import { attachTranscriptNotices, readNoticeSettings, readSessionTranscriptNotices } from "@/lib/transcript-notices-server";
 
 export async function GET(
   req: Request,
@@ -30,7 +31,6 @@ export async function GET(
   const perf = startServerPerf("GET /api/sessions/[id]");
   try {
     perf?.span("resolve");
-    const rpc = getRpcSession(id);
     const searchParams = new URL(req.url).searchParams;
     const force = searchParams.get("force") === "1";
 
@@ -39,7 +39,7 @@ export async function GET(
     // stays stale. Only probe on ?force=1 (session mount / page refresh): two
     // processes writing one JSONL is unsupported, so post-turn reads must not
     // scan disk. Eviction is idle-only; mid-run the wrapper owns the write path.
-    let liveWrapper = rpc?.isAlive() ? rpc : undefined;
+    let liveWrapper = getLiveRpcSession(id);
     let wrapperRebuilt = false;
     if (force && liveWrapper?.evictIfDiskAhead()) {
       wrapperRebuilt = true;
@@ -58,15 +58,16 @@ export async function GET(
     const leafId = sm.getLeafId();
     const summaryTree = searchParams.get("tree") === "summary";
     const header = sm.getHeader();
-    // Only read the effective switch before validation, never scan notices here.
-    const showNotices = header?.cwd ? readShowCacheMissNotices(header.cwd) : false;
+    // Snapshot the effective settings before validation, without scanning entries.
+    const noticeSettings = header?.cwd ? readNoticeSettings(header.cwd) : undefined;
+    const noticeBits = NOTICE_SETTING_KEYS.map((key) => noticeSettings?.[key] ? "1" : "0").join("");
     // Validate background views before projecting the full tree/context/stats.
     // No force: background reads must never evict or start a runtime wrapper.
     const latestEntry = entries[entries.length - 1] as { id?: string } | undefined;
     const snapshotRevision = computeSessionRevision({
       filePath,
-      // The effective notices switch changes messages without touching the session file.
-      sourceId: `${liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk"}${showNotices ? "+notices" : ""}`,
+      // Each effective notice setting can change messages without touching the session file.
+      sourceId: `${liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk"}+notices:${noticeBits}`,
       entryCount: entries.length,
       latestEntryId: typeof latestEntry?.id === "string" ? latestEntry.id : null,
       leafId: leafId ?? null,
@@ -86,14 +87,13 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const rawTail = Number(searchParams.get("tail"));
     const tail = Number.isFinite(rawTail) && rawTail > 0 ? Math.min(rawTail, 1000) : 50;
-    // pi's showCacheMissNotices (#1265): cache, cost and provider notices on the messages they follow.
-    const transcriptNotices = showNotices
-      ? collectTranscriptNotices(
-          entries as unknown as SessionEntry[],
-          withSessionPrices(entries as unknown as SessionEntry[], liveRpc?.inner.modelRuntime),
-          { leafId },
-        )
-      : undefined;
+    // Render using the same notice settings that went into the revision.
+    const transcriptNotices = readSessionTranscriptNotices({
+      entries: entries as unknown as SessionEntry[],
+      settings: noticeSettings,
+      leafId,
+      models: liveRpc?.inner.modelRuntime,
+    });
     const context = attachTranscriptNotices(buildSessionContext(entries as never, leafId, {
       deferThinking,
       deferToolResultImages,

@@ -49,7 +49,7 @@ test("background revision validation skips projections without touching the runt
       assert.equal(forbidProjection, false, "unchanged reads must not build the tree");
       return [];
     },
-    // The header's cwd is needed to read the effective notices switch even on unchanged reads.
+    // The header's cwd is needed to read the effective notice settings even on unchanged reads.
     getHeader: () => header,
     getSessionName: () => {
       assert.equal(forbidProjection, false, "unchanged reads must not hydrate metadata");
@@ -149,14 +149,28 @@ test("background revision validation skips projections without touching the runt
   };
   await unchanged(off.snapshotRevision);
 
-  // No session entries or bytes change: only the effective setting changes the revision.
+  // No session entries or bytes change: only the effective settings change the revision.
   await writeFile(globalSettings, JSON.stringify({ showCacheMissNotices: true }));
   const on = await (await read(`&knownRevision=${off.snapshotRevision}`)).json();
   assert.equal(on.unchanged, undefined);
   assert.notEqual(on.snapshotRevision, off.snapshotRevision);
-  assert.deepEqual(on.context.messages.at(-1).transcriptNotices, [{ kind: "thinking_dropped", count: 1 }]);
+  const reasoningNotice = [{ kind: "reasoning_dropped", provider: "anthropic", count: 1 }];
+  assert.deepEqual(on.context.messages.at(-1).transcriptNotices, reasoningNotice);
   assert.equal(entries.at(-1).message.transcriptNotices, undefined, "notices never mutate persisted messages");
   await unchanged(on.snapshotRevision); // Enabled unchanged reads must not scan notices either.
+
+  // Each setting participates independently, not just whether any (or how many) are on.
+  const revisions = new Set([off.snapshotRevision, on.snapshotRevision]);
+  for (const key of ["cacheMisses", "cacheWarming", "compactionCosts", "reasoningDrops"]) {
+    await writeFile(projectSettings, JSON.stringify({ notices: { [key]: false } }));
+    const partial = await (await read(`&knownRevision=${on.snapshotRevision}`)).json();
+    assert.equal(partial.unchanged, undefined);
+    assert.ok(partial.snapshotRevision);
+    assert.equal(revisions.has(partial.snapshotRevision), false, `${key} changes the effective revision`);
+    revisions.add(partial.snapshotRevision);
+    assert.deepEqual(partial.context.messages.at(-1).transcriptNotices, key === "reasoningDrops" ? undefined : reasoningNotice);
+    await unchanged(partial.snapshotRevision);
+  }
 
   await writeFile(projectSettings, JSON.stringify({ showCacheMissNotices: false }));
   const projectOff = await (await read(`&knownRevision=${on.snapshotRevision}`)).json();
@@ -168,7 +182,7 @@ test("background revision validation skips projections without touching the runt
   await writeFile(projectSettings, JSON.stringify({ showCacheMissNotices: true }));
   const projectOn = await (await read(`&knownRevision=${projectOff.snapshotRevision}`)).json();
   assert.equal(projectOn.snapshotRevision, on.snapshotRevision);
-  assert.deepEqual(projectOn.context.messages.at(-1).transcriptNotices, [{ kind: "thinking_dropped", count: 1 }]);
+  assert.deepEqual(projectOn.context.messages.at(-1).transcriptNotices, reasoningNotice);
   await writeFile(globalSettings, JSON.stringify({ showCacheMissNotices: false }));
   await unchanged(projectOn.snapshotRevision); // A shadowed global change is not an effective change.
   await rm(projectSettings);
@@ -177,4 +191,13 @@ test("background revision validation skips projections without touching the runt
   assert.equal(backOff.snapshotRevision, off.snapshotRevision);
   assert.equal(backOff.context.messages.at(-1).transcriptNotices, undefined);
   assert.equal(evictions, 1, "settings validation never evicts or sends runtime commands");
+
+  // No saved session or wrapper: a cached revision cannot turn a real 404 into unchanged.
+  await rm(filePath);
+  globalThis.__piSessions.delete(id);
+  for (const extra of [`&knownRevision=${backOff.snapshotRevision}`, "&force=1"]) {
+    const missing = await read(extra);
+    assert.equal(missing.status, 404);
+    assert.deepEqual(await missing.json(), { error: "Session not found" });
+  }
 });

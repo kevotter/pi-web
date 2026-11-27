@@ -28,6 +28,7 @@ import {
   SUBAGENT_RESULT_TYPE,
   selectSubagentExtensionTools,
   settleOrphanedSubagentStatus,
+  configuredPackageRoots,
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   withSubagentExtensionTools,
@@ -57,6 +58,7 @@ import {
   assertLocalSubagentContinuation, createLocalSubagentPolicy, createLocalSubagentPolicyExtension,
   filterLocalSubagentProfiles, localSubagentMode,
 } from "./local-subagent-policy";
+import { isThinkingLevel } from "./thinking-levels";
 
 interface HostSession {
   readonly inner: AgentSessionLike;
@@ -65,6 +67,7 @@ interface HostSession {
   isAlive(): boolean;
   isRunning(): boolean;
   waitUntilReady(): Promise<void>;
+  waitForCompactionContinuation?(): Promise<void> | undefined;
   /**
    * Connect the session's MCP servers before a run prompts the SDK session directly, past the
    * wrapper's `send()`; false when Stop or `signal` ended the wait and the run must not start.
@@ -117,7 +120,11 @@ type StoredSubagentExecution = {
 /** A run's completion `notifyParent()` is delivering; `since` is absent on one added before a hot reload. */
 type ParentNotification = Pick<SubagentRunInfo, "sessionId" | "parentSessionId" | "completedAt"> & { since?: number };
 
+type SteeringAgent = AgentSessionLike["agent"];
+type SteeringMode = NonNullable<SteeringAgent["steeringMode"]>;
+
 declare global {
+  var __piSubagentWrapUpSteering: WeakMap<SteeringAgent, SteeringMode> | undefined;
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
   var __piSubagentConsumedResults: Map<string, string> | undefined;
@@ -126,7 +133,6 @@ declare global {
 const RESUME_ADMISSION_LOCK = Symbol.for("pi-web.subagent-resume-admission");
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
 const PARENT_IDLE_POLL_MS = 200;
-const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /**
  * A run prompts the SDK session its wrapper held at dispatch. The wrapper is idle while the run
@@ -214,6 +220,13 @@ function turnLimitError(turnLimit: number, undelivered: readonly string[]): stri
 
 type TurnLimitedSession = Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"];
 
+/** A settings write takes effect immediately, except during a forced wrap-up turn. */
+export function applyLiveSteeringMode(agent: SteeringAgent, mode: SteeringMode): void {
+  const wrapUpModes = globalThis.__piSubagentWrapUpSteering;
+  if (wrapUpModes?.has(agent)) wrapUpModes.set(agent, mode);
+  else agent.steeringMode = mode;
+}
+
 /**
  * Holds a run to the profile's `max_turns` through the SDK's awaited `finishTurn` hook: one
  * wrap-up turn when the SDK would otherwise continue, then `end`. Every run, a `resume`
@@ -229,7 +242,7 @@ function installTurnLimiter(
   let maxTurnsReached = false;
   let undelivered: string[] = [];
   const previousFinishTurn = inner.agent.finishTurn;
-  const previousSteeringMode = inner.agent.steeringMode;
+  const wrapUpModes = globalThis.__piSubagentWrapUpSteering ??= new WeakMap();
   // Finalized events retain the SDK's terminate hint; tool-result messages do not.
   const terminatingTools = new Set<string>();
   const unsubscribeTools = inner.subscribe((event) => {
@@ -259,6 +272,7 @@ function installTurnLimiter(
     // The awaited SDK boundary delivers the instruction before the wrap-up request.
     // In one-at-a-time mode a steer queued earlier would take the wrap-up turn and
     // leave the instruction for later, so that turn takes everything queued.
+    if (!wrapUpModes.has(inner.agent)) wrapUpModes.set(inner.agent, inner.agent.steeringMode);
     inner.agent.steeringMode = "all";
     await inner.steer(TURN_LIMIT_INSTRUCTION);
     return decision;
@@ -267,7 +281,9 @@ function installTurnLimiter(
     error: () => (maxTurnsReached ? turnLimitError(turnLimit, undelivered) : undefined),
     restore: () => {
       inner.agent.finishTurn = previousFinishTurn;
-      inner.agent.steeringMode = previousSteeringMode;
+      const mode = wrapUpModes.get(inner.agent);
+      if (mode !== undefined) inner.agent.steeringMode = mode;
+      wrapUpModes.delete(inner.agent);
       unsubscribeTools();
     },
   };
@@ -509,8 +525,8 @@ export function parseSubagentModel(runtime: ModelRuntime, value: string | undefi
   const exact = findSubagentModel(runtime, requested);
   if (exact) return { model: exact };
   const colon = requested.lastIndexOf(":");
-  const level = requested.slice(colon + 1) as ThinkingLevel;
-  if (colon > 0 && THINKING_LEVELS.has(level)) {
+  const level = requested.slice(colon + 1);
+  if (colon > 0 && isThinkingLevel(level)) {
     const model = findSubagentModel(runtime, requested.slice(0, colon));
     if (model) return { model, thinkingLevel: level };
   }
@@ -710,7 +726,10 @@ export function createSubagentController(
         modelRuntime: parentModelRuntime,
         settingsManager,
         resourceLoaderOptions: {
-          ...subagentExtensionLoaderOptions({ ...profile, mcp: mcpEnabled, localPolicy }),
+          ...subagentExtensionLoaderOptions(
+            { ...profile, mcp: mcpEnabled, localPolicy },
+            configuredPackageRoots(childCwd, agentDir, settingsManager),
+          ),
           ...skillsBinding.loaderOptions,
           ...(extensionFactories.length > 0 ? { extensionFactories } : {}),
           noPromptTemplates: true,
@@ -796,7 +815,7 @@ export function createSubagentController(
         ?? profile.thinking
         ?? profileModel?.thinkingLevel
         ?? parent.inner.agent.state?.thinkingLevel;
-      if (thinking && !THINKING_LEVELS.has(thinking as ThinkingLevel)) {
+      if (thinking && !isThinkingLevel(thinking)) {
         throw new Error(`Invalid subagent thinking level: ${thinking}`);
       }
       const parentModel = parent.inner.model as ReturnType<ModelRuntime["getModel"]>;
@@ -882,6 +901,8 @@ export function createSubagentController(
           if (childSession && !childSession.isAlive()) throw new Error(CLOSED_BEFORE_RUN);
           await prepareChildMcp(childSession, stored);
           await inner.prompt(delegatedTask, { source: "rpc" });
+          const continuation = childSession?.waitForCompactionContinuation?.();
+          if (continuation) await continuation;
           const text = runResultText(sessionManager, runStart);
           const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
           const aborted = stored.abortRequested || stop?.aborted === true;
@@ -1090,6 +1111,8 @@ export function createSubagentController(
         if (!wrapper!.isAlive()) throw new Error(CLOSED_BEFORE_RUN);
         await prepareChildMcp(wrapper, stored);
         await wrapper!.inner.prompt(request.task, { source: "rpc" });
+        const continuation = wrapper!.waitForCompactionContinuation?.();
+        if (continuation) await continuation;
         const text = runResultText(manager, runStart);
         const stop = stored.abortRequested ? undefined : lastAssistantStop(manager);
         const aborted = stored.abortRequested || stop?.aborted === true;
@@ -1208,7 +1231,10 @@ export function createSubagentController(
     const path = wrapper?.sessionFile || run.sessionPath || await dependencies.resolveSessionPath(sessionId);
     if (!path) throw new Error("Subagent session file not found");
     assertContinuation(parent, path, sessionId, parentSessionId);
-    if (!wrapper?.isAlive() || !wrapper.isRunning()) throw new Error("Subagent is not running");
+    // A wrapper may report running during compaction or while waiting for its continuation,
+    // but the SDK can queue a steer without an active turn to deliver it. In particular, a
+    // compaction without a continuation must not leave that message for a later resume.
+    if (!wrapper?.isAlive() || !wrapper.inner.isStreaming) throw new Error("Subagent is not running");
     if (getSubagentRuns().get(sessionId)?.turnLimitReached) throw new Error("Subagent reached its turn limit and is stopping; resume it to continue");
     if (!message.trim()) throw new Error("Steering message is required");
     await wrapper.inner.steer(message.trim());
